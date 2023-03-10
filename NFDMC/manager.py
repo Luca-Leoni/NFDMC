@@ -3,8 +3,8 @@ import torch.nn as nn
 
 from torch import Tensor
 from typing import Optional
-from Flows.flow import Flow
-from Distributions.distribution import Distribution
+from .Flows.flow import Flow
+from .Distributions.distribution import Distribution
 
 class Manager(nn.Module):
     """
