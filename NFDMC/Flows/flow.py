@@ -9,7 +9,7 @@ class Flow(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-    def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
+    def forward(self, z: Tensor) -> tuple[Tensor, Tensor]: # pyright: ignore
         """
         Override of the torch.nn.Module function
 
@@ -32,7 +32,7 @@ class Flow(nn.Module):
         """
         raise NotImplementedError
 
-    def inverse(self, z: Tensor) -> Tensor:
+    def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]: # pyright: ignore
         """
         inverse of the forward transformation
 
@@ -43,7 +43,7 @@ class Flow(nn.Module):
 
         Returns
         -------
-        Tensor
+        tuple[Tensor, Tensor]
             untrasformed samples along with the log determinant of J(T(z))
 
         Raises

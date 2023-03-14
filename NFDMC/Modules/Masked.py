@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 from torch import Tensor
@@ -6,7 +7,7 @@ class MaskedLinear(nn.Linear):
     """
     Dense linear layer masked in order to eliminate varius connection inside the layer making it sparse
     """
-    def __init__(self, mask: Tensor, bias: bool = True):
+    def __init__(self, in_features: int, out_features: int, mask: Tensor | str = "lowt", bias: bool = True):
         """
         Constructor
 
@@ -17,9 +18,17 @@ class MaskedLinear(nn.Linear):
         bias
             Bias inside the linear layer
         """
-        super().__init__(mask.shape[0], mask.shape[1], bias)
+        super().__init__(in_features, out_features, bias)
         
-        self.register_buffer("_mask", mask)
+        if isinstance(mask, str):
+            if mask == "lowt":
+                mask = torch.tril(torch.ones(out_features, in_features))
+            elif mask == "upt":
+                mask = torch.triu(torch.ones(out_features, in_features))
+            else:
+                raise NotImplementedError()
+
+        self.register_buffer("_mask", mask) # pyright: ignore
 
 
     def forward(self, x: Tensor) -> Tensor:
@@ -38,4 +47,4 @@ class MaskedLinear(nn.Linear):
         Tensor
             Output data
         """
-        return nn.functional.linear(x, self._mask.transpose(0, 1) * self.weight, self.bias) # pyright: ignore
+        return nn.functional.linear(x, self._mask * self.weight, self.bias) # pyright: ignore
