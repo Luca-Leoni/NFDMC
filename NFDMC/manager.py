@@ -74,7 +74,53 @@ class Manager(nn.Module):
             log_p -= log_det
         return z, log_p
 
-    def reverse_kld(self, num_sample: int):
+    def log_prob(self, z: Tensor) -> Tensor:
+        """
+        Compute the log probability of the model
+
+        Parameters
+        ----------
+        z
+            Batch of samples to compute the log probability from
+
+        Returns
+        -------
+        Tensor
+            Log probabilities of the batch of samples
+        """
+        log_p = torch.zeros(len(z), dtype=z.dtype, device=z.device)
+        for i in range(len(self._flows) - 1, -1, -1):
+            z, log_det = self._flows[i].inverse(z) # pyright: ignore
+            log_p += log_det
+        log_p = self._base.log_prob(z)
+        return log_p
+
+    def forward_kdl(self, z: Tensor) -> Tensor:
+        r"""
+        Compute the forward KDL divergence of the model
+
+         The forward KDL is a distance inside the space of probability distribution that can be approximated via Monte Carlo sampling as follows:
+        .. math::
+            L(\mathbb{\theta}) \approx -\frac{1}{M} \sum_{m=1}^M \log q(T^{-1}(\mathbb{z}_m)) + \log \abs{\det J_{T^{-1}}(\mathbb{z}_m)}
+
+        Parameters
+        ----------
+        z
+            Batch with the samples from the target distribution
+
+        Returns
+        -------
+        Tensor
+            Forward KDL loss of the model
+        """
+        log_p = torch.zeros(z.shape[0], device=z.device)
+        for i in range(len(self._flows) - 1, -1, -1):
+            z, log_det = self._flows[i].inverse(z) # pyright: ignore
+            log_p += log_det
+        log_p += self._base.log_prob(z)
+        return -torch.mean(log_p)
+
+    def reverse_kld(self, num_sample: int) -> Tensor:
         r"""
         Compute the reverse KDL divergence of the model
 
@@ -88,6 +134,11 @@ class Manager(nn.Module):
         num_sample
             number of sample to use inside the evaluation of the loss, the more the better.
 
+        Returns
+        -------
+        Tensor
+            Reverse KDL loss
+
         Raises
         ------
         ValueError:
@@ -99,8 +150,13 @@ class Manager(nn.Module):
         z, mlog_p = self._base(num_sample)
         for flow in self._flows:
             z, log_det = flow(z)
-            mlog_p -= log_det
+            mlog_p += log_det
+
+        # print(f"Abbiamo samplato: {z}\n")
+        # print(f"the log_p of the model is: {mlog_p}")
 
         tlog_p = self._target.log_prob(z)
 
-        return torch.mean(tlog_p) - torch.mean(mlog_p)
+        # print(f"the log_p of the target is: {tlog_p}\n")
+
+        return - torch.mean(tlog_p) - torch.mean(mlog_p)

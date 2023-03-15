@@ -72,7 +72,7 @@ class Affine(Flow):
         """ 
         h = self._cond(z1)
         z = torch.clone(z1)
-        z[:, 0] = (z[:,0] - h[0,1])/torch.exp(h[0,0])
+        z[:, 0] = (z[:,0] - h[:,1])/torch.exp(h[:,0])
 
         for i in range(1, z1.shape[1]):
             h = self._cond(z)
