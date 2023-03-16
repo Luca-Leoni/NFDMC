@@ -70,12 +70,11 @@ class Affine(Flow):
         tuple[Tensor, Tensor]
             Untransformed variabel along with the log determinant of the inverse transformation
         """ 
-        h = self._cond(z1)
-        z = torch.clone(z1)
-        z[:, 0] = (z[:,0] - h[:,1])/torch.exp(h[:,0])
+        h = self._cond(torch.clone(z1))
+        z1[:, 0] = (z1[:,0] - h[:,1])/torch.exp(h[:,0])
 
         for i in range(1, z1.shape[1]):
-            h = self._cond(z)
-            z[:,i] = (z[:,i] - h[:, 2*i+1])/torch.exp(h[:, 2*i])
+            h = self._cond(torch.clone(z1))
+            z1[:,i] = (z1[:,i] - h[:, 2*i+1])/torch.exp(h[:, 2*i])
 
-        return z, -torch.sum(self._cond(z)[:, ::2], dim=1)
+        return z1, -torch.sum(self._cond(z1)[:, ::2], dim=1)

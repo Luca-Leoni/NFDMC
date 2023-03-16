@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 from torch import Tensor
@@ -74,3 +75,30 @@ class Distribution(nn.Module):
             If is not implemented in the costumazied distribution it fails
         """
         raise NotImplementedError
+
+
+class RSDistribution(Distribution):
+    """
+    Version of the distribution primitive that automatically implements the sample method by using the rejection sampling algorithm
+    """
+    def __init__(self, n_dim: int, prop_scale: Tensor = torch.tensor(1.0), prop_shift: Tensor = torch.tensor(0.0)):
+        super().__init__()
+
+        self._n_dim = n_dim
+        self.register_buffer("_prop_scale", prop_scale)
+        self.register_buffer("_prop_shift", prop_shift)
+
+    def sample(self, num_sample: int = 1) -> Tensor:
+        samples = torch.zeros(0, self._n_dim, device=self._prop_scale.device) # pyright: ignore
+
+        while samples.shape[0] < num_sample:
+            samples = torch.cat([self._rejection_sampling(num_sample), samples], dim=0)
+
+        return samples[:num_sample,:]
+
+    def _rejection_sampling(self, n_steps: int) -> Tensor:
+        proposal = self._prop_scale * torch.rand(n_steps, self._n_dim, device=self._prop_scale.device) + self._prop_shift # pyright: ignore
+
+        accept = torch.exp(self.log_prob(proposal)) < torch.rand(n_steps, device=self._prop_scale.device) # pyright: ignore
+
+        return proposal[accept, :]

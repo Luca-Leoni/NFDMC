@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from torch import Tensor
-from .distribution import Distribution
+from .distribution import Distribution, RSDistribution
 
 class MultiGaussian(Distribution):
     """
@@ -105,7 +105,7 @@ class MultiGaussian(Distribution):
 
 
 
-class TwoMoon(Distribution):
+class TwoMoon(RSDistribution):
     """
     Two Moon distribution generally used as a toy model to test architectures
     """
@@ -113,7 +113,7 @@ class TwoMoon(Distribution):
         """
         Constructor
         """
-        super().__init__()
+        super().__init__(2, prop_scale = torch.tensor(6.0))
 
     def log_prob(self, z: Tensor) -> Tensor:
         r"""

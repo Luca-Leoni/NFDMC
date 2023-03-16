@@ -4,15 +4,17 @@ import torch.nn as nn
 from ...Modules.Masked import MaskedLinear
 from torch import Tensor
 
+#---------------------------------------
+
 class MaskedConditioner(nn.Module):
     """
     Maked conditioner where the parameters for the transformer are evaluated trhough a neural network with a series of MaskedLinear layers along with ReLU activation functions.
     """
-    def __init__(self, variable_dim: int, trans_features: int, net_lenght: int = 1, bias: bool = True):
+    def __init__(self, variable_dim: int, trans_features: int, net_lenght: int = 1, hidden_multiplier: int = 1, bias: bool = True):
         r"""
         Constructor
 
-        Construct the Conditioner with a series of perceptron layers with sizes given inside a list, also the number of features of the parameters inside transformers are needed. Basically it assumes to construct a function of the type:
+        Construct the Conditioner with a series of perceptron layers with sizes defined by the variable dimensions and the number of features of the parameters needed inside the transformer. Basically it construct a function of the type:
             .. math::
                 c(\mathbb{z}) = [h_1^1, \dots, h_1^{T}, h_2^1(z_1), \dots, h_{D}^{T}(z_{<D})] = \mathbb{h}
         In this way every variable of the input vector will have trans_feature, T, number of parameters generated so that $h_i^j$ will depend only on $z_{<i}$ for every $j$.
@@ -25,8 +27,10 @@ class MaskedConditioner(nn.Module):
             Number of parameter needed for one variable in the transformer function automatically defines the output layer dimensions as variable_dim * trans_features
         net_lenght
             Tells how many layers should the net posses, having that every added layer is composed by a ReLU followed by a MaskedLinear of dimensions (out_dim, out_dim) with out_dim = variable_dim * trans_features
+        hidden_multiplier
+            Scale factor that determines the dimensions of the variables in the hidden layer, in particular the hidden layers will have dimensions given by variable_dim * trans_features * hidden_multiplier. So that a net with var_dim = 2, trans_fet = 4, and hidden_mul = 2 will have the input layer of dim 2, the hidden layers of dimension 16 and the output one of dimension 8
         bias
-            Tell if the bias is present
+            Tell if the bias is present in the masked linear layers
         """
         super().__init__()
        
@@ -36,16 +40,27 @@ class MaskedConditioner(nn.Module):
 
         # Set up the dimensions and net list
         out_dim = variable_dim * trans_features
+        hid_dim = variable_dim * trans_features * hidden_multiplier
         net = []
 
+        ## Create the model
+
         # Adding the first layer
-        net.append(MaskedLinear(variable_dim, out_dim, mask=self._get_mask(variable_dim, out_dim, inp_layer=False), bias=bias))
+        net.append(MaskedLinear(variable_dim, hid_dim, mask=self._get_mask(variable_dim, hid_dim, tile_width=1, tile_lenght=trans_features*hidden_multiplier), bias=bias))
+
+        # Temporarily increase trans_features for hidden layers
         for _ in range(net_lenght):
             # Add non linear effects
             net.append(nn.ReLU())
 
             # Add another Masked Layer
-            net.append(MaskedLinear(out_dim, out_dim, mask=self._get_mask(out_dim, out_dim, inp_layer=True), bias=bias))
+            net.append(MaskedLinear(hid_dim, hid_dim, mask=self._get_mask(hid_dim, hid_dim, tile_width=trans_features*hidden_multiplier, tile_lenght=trans_features*hidden_multiplier), bias=bias))
+
+        # Add last layer
+        net.append(nn.ReLU())
+        net.append(MaskedLinear(hid_dim, out_dim, mask=self._get_mask(hid_dim, out_dim, tile_width=trans_features*hidden_multiplier, tile_lenght=trans_features)))
+
+        ## Saving model
 
         # Save the final result
         self.net = nn.Sequential(*net)
@@ -70,17 +85,18 @@ class MaskedConditioner(nn.Module):
         h = self.net(x[:,:-1])
         return torch.cat( (self.h1.expand(x.shape[0], self._trans_features), h), dim=1)
 
-    def _get_mask(self, in_features: int, out_features: int, inp_layer: bool) -> Tensor:
+    def _get_mask(self, in_features: int, out_features: int, tile_width: int = 1, tile_lenght: int = 1) -> Tensor:
         """
-        Generates the wanted mask for the MaskedLinear layers inside the architecture
+        Generates a tiled mask for the MaskedLinear layers
 
-        In particular the mask we want is composed by a connection that allows the parameters $h_i^j$ to depend only on $z_{<i}$ so that a mask of the following type is needed
-            [[1, 0, 0, ..., 0],
-             [1, 0, 0, ..., 0],
+        Basically it generates a mask composed by tiles described as follows
+            [[1, 1, 0, ..., 0],
              [1, 1, 0, ..., 0],
+             [1, 1, 0, ..., 0],
+             [1, 1, 1, ..., 0],
              ...
              [1, 1, 1, ..., 1]]
-        Basically a kind of upper triangular matrix with every column repited a number of times equal to the number of transformer parameters, in the case in figure the parameters were 2. In the case the mask needs to be created for the input layer, where the matrix is not squared but the input features are less the rows do not need to be repeated.
+        Basically a kind of lower triangular matrix with a series of ones composing tiles with width given by number of rows repeated and lenght the number of ones added after a tile is complete.
 
         Parameters
         ----------
@@ -88,8 +104,10 @@ class MaskedConditioner(nn.Module):
             Dimensions of the input data
         out_features
             Dimesnions of the output data
-        inp_layer
-            Tells if the mask is for the input layer because in that case the repeating of the same column is not needed
+        tile_width
+            Width of the tiles, giving the number of rows to repeate to complite a tile
+        tile_lenght
+            Lenght of the tiles, giving the number of ones to add after every tile
 
         Returns
         -------
@@ -97,9 +115,8 @@ class MaskedConditioner(nn.Module):
             Desired mask for the conditioner
         """
         mask = torch.ones(out_features, in_features)
-        rep  = self._trans_features if inp_layer else 1
 
         for i in range(out_features):
-            mask[i*self._trans_features:(i+1)*self._trans_features, (i+1)*rep:] = 0
+            mask[i * tile_lenght:(i+1) * tile_lenght, (i+1) * tile_width:] = 0
 
         return mask

@@ -25,3 +25,11 @@ def test_Gaussian_sample_log_prob(dim: int, num_sample: int):
     assert sample.shape == (num_sample, dim)
     assert log_prob.shape == (num_sample,)
     assert (log_prob < 0).all()
+
+
+def test_TwoMoon_sampling():
+    dist = General.TwoMoon()
+
+    sample = dist.sample(100)
+
+    assert sample.shape == (100, 2)

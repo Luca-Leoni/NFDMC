@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 
 from torch import Tensor
-from typing import Optional
 from .Flows.flow import Flow
 from .Distributions.distribution import Distribution
 
@@ -10,7 +9,7 @@ class Manager(nn.Module):
     """
     Flow manager used to compose the different flows and perform the computations
     """
-    def __init__(self, base: Distribution, flows: list[Flow], target: Optional[Distribution|None] = None):
+    def __init__(self, base: Distribution, flows: list[Flow], target: Distribution | None = None):
         """
         Constructor
 
@@ -120,7 +119,7 @@ class Manager(nn.Module):
         log_p += self._base.log_prob(z)
         return -torch.mean(log_p)
 
-    def reverse_kld(self, num_sample: int) -> Tensor:
+    def reverse_kdl(self, num_sample: int) -> Tensor:
         r"""
         Compute the reverse KDL divergence of the model
 
@@ -152,11 +151,6 @@ class Manager(nn.Module):
             z, log_det = flow(z)
             mlog_p += log_det
 
-        # print(f"Abbiamo samplato: {z}\n")
-        # print(f"the log_p of the model is: {mlog_p}")
-
         tlog_p = self._target.log_prob(z)
-
-        # print(f"the log_p of the target is: {tlog_p}\n")
 
         return - torch.mean(tlog_p) - torch.mean(mlog_p)

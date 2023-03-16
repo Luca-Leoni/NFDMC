@@ -15,7 +15,7 @@ def test_Masked_Linear(var_dim, trans_dim, layers):
     """
     Check the properties of the Masked conditioner, in particular the dimensions and the fact that h_i depends on z_{<1}(REMEMBER THE RIGHT WAY)
     """
-    cond = MaskedConditioner(var_dim, trans_dim, layers).to("cuda")
+    cond = MaskedConditioner(var_dim, trans_dim, layers, 2).to("cuda")
 
     z = torch.ones(3, var_dim, device="cuda")
     h = cond(z)
