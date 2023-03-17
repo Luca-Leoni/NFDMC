@@ -1,16 +1,17 @@
 import torch
 import torch.nn as nn
 
-from ...Modules.Masked import MaskedLinear
+from ..Modules.masked import MaskedLinear
+from ..Archetypes import Conditioner
 from torch import Tensor
 
 #---------------------------------------
 
-class MaskedConditioner(nn.Module):
+class MaskedConditioner(Conditioner):
     """
     Maked conditioner where the parameters for the transformer are evaluated trhough a neural network with a series of MaskedLinear layers along with ReLU activation functions.
     """
-    def __init__(self, variable_dim: int, trans_features: int, net_lenght: int = 1, hidden_multiplier: int = 1, init_zero: bool = False, bias: bool = True):
+    def __init__(self, variable_dim: int, trans_features: int, net_lenght: int = 1, hidden_multiplier: int = 1, init_zero: bool = False, bias: bool = True, leaky: float = 0.):
         r"""
         Constructor
 
@@ -33,12 +34,13 @@ class MaskedConditioner(nn.Module):
             Tell if the last layer and the parameters of the first variable are initialized as zeros
         bias
             Tell if the bias is present in the masked linear layers
+        leaky
+            Gives the parameter for the leaky ReLU activation function, with 0. the normal ones are used
         """
-        super().__init__()
+        super().__init__(variable_dim, trans_features)
        
         # The last variable is not used inside computations
         variable_dim -= 1
-        self._trans_features = trans_features
 
         # Set up the dimensions and net list
         out_dim = variable_dim * trans_features
@@ -53,13 +55,13 @@ class MaskedConditioner(nn.Module):
         # Temporarily increase trans_features for hidden layers
         for _ in range(net_lenght):
             # Add non linear effects
-            net.append(nn.ReLU())
+            net.append(nn.LeakyReLU(leaky))
 
             # Add another Masked Layer
             net.append(MaskedLinear(hid_dim, hid_dim, mask=self._get_mask(hid_dim, hid_dim, tile_width=trans_features*hidden_multiplier, tile_lenght=trans_features*hidden_multiplier), bias=bias))
 
         # Add last layer
-        net.append(nn.ReLU())
+        net.append(nn.LeakyReLU(leaky))
         net.append(MaskedLinear(hid_dim, out_dim, mask=self._get_mask(hid_dim, out_dim, tile_width=trans_features*hidden_multiplier, tile_lenght=trans_features)))
 
         if init_zero:
@@ -73,6 +75,7 @@ class MaskedConditioner(nn.Module):
 
         # Create parameters for the features of the first variables
         self.h1  = nn.Parameter(torch.zeros(trans_features) if init_zero else torch.rand(trans_features))
+
 
     def forward(self, x: Tensor) -> Tensor:
         """
@@ -89,7 +92,7 @@ class MaskedConditioner(nn.Module):
             Output data
         """
         h = self.net(x[:,:-1])
-        return torch.cat( (self.h1.expand(x.shape[0], self._trans_features), h), dim=1)
+        return torch.cat( (self.h1.expand(x.shape[0], self.trans_features), h), dim=1)
 
     def _get_mask(self, in_features: int, out_features: int, tile_width: int = 1, tile_lenght: int = 1) -> Tensor:
         """

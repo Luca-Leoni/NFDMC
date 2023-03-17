@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from torch import Tensor
-from .distribution import Distribution, RSDistribution
+from ..Archetypes import Distribution, RSDistribution
 
 class MultiGaussian(Distribution):
     """

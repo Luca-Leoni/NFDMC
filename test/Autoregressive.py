@@ -1,7 +1,8 @@
 import torch
 
-from NFDMC.Flows.Autoregressive.conditioner import MaskedConditioner
-from NFDMC.Flows.Autoregressive.transformer import Affine
+from NFDMC.Flows import Autoregressive
+from NFDMC.Flows.conditioner import MaskedConditioner
+from NFDMC.Flows.transformer import Affine
 
 from hypothesis import given, settings, strategies as st
 
@@ -35,16 +36,15 @@ def test_Affine_transformer(var_dim, layers):
     """
     Check dimensions of the net and the fact that the inverse is really an inverse
     """
-    cond = MaskedConditioner(var_dim, 2, layers).to("cuda")
-    trans = Affine(cond).to("cuda")
+    flow = Autoregressive(Affine(), MaskedConditioner(var_dim, 2, layers)).to("cuda")
 
     z = torch.rand(5, var_dim, device="cuda")
-    z1, log_det = trans(z)
+    z1, log_det = flow(z)
 
     assert z1.shape == (5, var_dim)
     assert log_det.shape == (5,)
 
-    z2, log_det = trans.inverse(z1)
+    z2, log_det = flow.inverse(z1)
     
     assert z2.shape == (5, var_dim)
     assert log_det.shape == (5,)

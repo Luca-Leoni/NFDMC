@@ -1,7 +1,7 @@
 import torch
 
 from torch import Tensor
-from .flow import Flow
+from ..Archetypes import Flow
 
 class PermuteRandom(Flow):
     """

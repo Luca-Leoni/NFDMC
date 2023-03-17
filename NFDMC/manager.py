@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 
 from torch import Tensor
-from .Flows.flow import Flow
-from .Distributions.distribution import Distribution
+from .Archetypes import Flow, Distribution
 
 class Manager(nn.Module):
     """

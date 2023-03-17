@@ -1,6 +1,6 @@
 import torch
 
-from NFDMC.Modules.Masked import MaskedLinear
+from NFDMC.Modules.masked import MaskedLinear
 from hypothesis import given, settings, strategies as st
 
 @settings(deadline=5000)

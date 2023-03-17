@@ -1,7 +1,7 @@
 import torch
 
 from torch import Tensor
-from . import Distribution
+from ..Archetypes import Distribution
 
 class Base(Distribution):
     """
