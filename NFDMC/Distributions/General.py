@@ -113,7 +113,7 @@ class TwoMoon(RSDistribution):
         """
         Constructor
         """
-        super().__init__(2, prop_scale = torch.tensor(6.0))
+        super().__init__(2, prop_scale = torch.tensor(6.0), prop_shift = torch.tensor(-3.0))
 
     def log_prob(self, z: Tensor) -> Tensor:
         r"""
