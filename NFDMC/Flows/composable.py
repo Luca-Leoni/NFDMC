@@ -1,5 +1,3 @@
-import torch
-
 from ..Archetypes import Flow, Transformer, Conditioner
 from torch import Tensor
 
