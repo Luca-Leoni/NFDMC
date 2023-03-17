@@ -10,7 +10,7 @@ class MaskedConditioner(nn.Module):
     """
     Maked conditioner where the parameters for the transformer are evaluated trhough a neural network with a series of MaskedLinear layers along with ReLU activation functions.
     """
-    def __init__(self, variable_dim: int, trans_features: int, net_lenght: int = 1, hidden_multiplier: int = 1, bias: bool = True):
+    def __init__(self, variable_dim: int, trans_features: int, net_lenght: int = 1, hidden_multiplier: int = 1, init_zero: bool = False, bias: bool = True):
         r"""
         Constructor
 
@@ -29,6 +29,8 @@ class MaskedConditioner(nn.Module):
             Tells how many layers should the net posses, having that every added layer is composed by a ReLU followed by a MaskedLinear of dimensions (out_dim, out_dim) with out_dim = variable_dim * trans_features
         hidden_multiplier
             Scale factor that determines the dimensions of the variables in the hidden layer, in particular the hidden layers will have dimensions given by variable_dim * trans_features * hidden_multiplier. So that a net with var_dim = 2, trans_fet = 4, and hidden_mul = 2 will have the input layer of dim 2, the hidden layers of dimension 16 and the output one of dimension 8
+        init_zero
+            Tell if the last layer and the parameters of the first variable are initialized as zeros
         bias
             Tell if the bias is present in the masked linear layers
         """
@@ -60,13 +62,17 @@ class MaskedConditioner(nn.Module):
         net.append(nn.ReLU())
         net.append(MaskedLinear(hid_dim, out_dim, mask=self._get_mask(hid_dim, out_dim, tile_width=trans_features*hidden_multiplier, tile_lenght=trans_features)))
 
+        if init_zero:
+            nn.init.zeros_(net[-1].weight)
+            nn.init.zeros_(net[-1].bias)
+
         ## Saving model
 
         # Save the final result
         self.net = nn.Sequential(*net)
 
         # Create parameters for the features of the first variables
-        self.h1  = nn.Parameter(torch.rand(trans_features))
+        self.h1  = nn.Parameter(torch.zeros(trans_features) if init_zero else torch.rand(trans_features))
 
     def forward(self, x: Tensor) -> Tensor:
         """
