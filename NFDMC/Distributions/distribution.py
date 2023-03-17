@@ -99,6 +99,6 @@ class RSDistribution(Distribution):
     def _rejection_sampling(self, n_steps: int) -> Tensor:
         proposal = self._prop_scale * torch.rand(n_steps, self._n_dim, device=self._prop_scale.device) + self._prop_shift # pyright: ignore
 
-        accept = torch.exp(self.log_prob(proposal)) < torch.rand(n_steps, device=self._prop_scale.device) # pyright: ignore
+        accept = torch.exp(self.log_prob(proposal)) > torch.rand(n_steps, device=self._prop_scale.device) # pyright: ignore
 
         return proposal[accept, :]
