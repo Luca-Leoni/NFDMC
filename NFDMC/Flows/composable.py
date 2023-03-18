@@ -1,3 +1,5 @@
+import torch
+
 from ..Archetypes import Flow, Transformer, Conditioner
 from torch import Tensor
 
@@ -53,7 +55,7 @@ class Autoregressive(Flow):
         return (self.__trans(z, h), self.__trans.log_det(z, h))
 
     def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]:
-        """
+        r"""
         Compute the inverse of the trasnformation by doing an element wise invertion of the variable. In particular it passes to the inverse trasnformation of the transformer an array with $z_i$ of the batch and $\mathbb{h_i}$ of the batch
 
         Parameters
@@ -66,10 +68,10 @@ class Autoregressive(Flow):
         tuple[Tensor, Tensor]
             Untransformed variable and log determinant of the inverse transformation
         """
-        h = self.__cond(z)
+        h = self.__cond(torch.clone(z)) # TODO: find a way to avoid those cloning
 
         for i in range(z.shape[1]):
             z[:, i] = self.__trans.inverse(z[:, i], h[:, self.__trans.trans_features * i: self.__trans.trans_features * i + 2])
-            h = self.__cond(z)
+            h = self.__cond(torch.clone(z))
 
         return z, -self.__trans.log_det(z, h)
