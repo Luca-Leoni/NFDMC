@@ -87,10 +87,11 @@ class Manager(nn.Module):
             Log probabilities of the batch of samples
         """
         log_p = torch.zeros(len(z), dtype=z.dtype, device=z.device)
+        x = z
         for i in range(len(self._flows) - 1, -1, -1):
-            z, log_det = self._flows[i].inverse(z) # pyright: ignore
+            x, log_det = self._flows[i].inverse(x) # pyright: ignore
             log_p += log_det
-        log_p = self._base.log_prob(z)
+        log_p += self._base.log_prob(x)
         return log_p
 
     def forward_kdl(self, z: Tensor) -> Tensor:
@@ -112,10 +113,11 @@ class Manager(nn.Module):
             Forward KDL loss of the model
         """
         log_p = torch.zeros(z.shape[0], device=z.device)
+        x = z
         for i in range(len(self._flows) - 1, -1, -1):
-            z, log_det = self._flows[i].inverse(z) # pyright: ignore
+            x, log_det = self._flows[i].inverse(x) # pyright: ignore
             log_p += log_det
-        log_p += self._base.log_prob(z)
+        log_p += self._base.log_prob(x)
         return -torch.mean(log_p)
 
     def reverse_kdl(self, num_sample: int) -> Tensor:

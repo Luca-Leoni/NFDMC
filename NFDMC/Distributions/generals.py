@@ -54,12 +54,10 @@ class MultiGaussian(Distribution):
         if self._mean is None or self._std_dev is None:
             raise TypeError()
 
-        mean    = self._mean.expand(num_sample, self._dim)
-        std_dev = self._std_dev.expand(num_sample, self._dim)
+        z = torch.randn( (num_sample, self._dim), dtype=self._mean.dtype, device=self._mean.device)
+        z = self._mean + z * self._std_dev
 
-        z = torch.normal(mean=mean, std=std_dev)
-
-        return z, - (torch.log(2*torch.pi*torch.prod(self._std_dev**2)) + torch.sum(torch.pow((z - mean)/std_dev, 2), 1))/2
+        return z, - 1.8378770664093453 - torch.log(torch.prod(self._std_dev)) - torch.sum(torch.pow((z - self._mean)/self._std_dev, 2), 1)/2
 
     def log_prob(self, z: Tensor) -> Tensor:
         """
@@ -78,7 +76,7 @@ class MultiGaussian(Distribution):
         if self._std_dev is None:
             raise TypeError()
 
-        return - (torch.log(2*torch.pi*torch.prod(self._std_dev**2)) + torch.sum(torch.pow((z - self._mean)/self._std_dev, 2), 1))/2
+        return - 1.8378770664093453 - torch.log(torch.prod(self._std_dev)) - torch.sum(torch.pow((z - self._mean)/self._std_dev, 2), 1)/2
 
     def sample(self, num_sample: int = 1) -> Tensor:
         """ 

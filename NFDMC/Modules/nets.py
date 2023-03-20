@@ -20,6 +20,8 @@ class RealMVP(nn.Module):
             Leaky parameters for the LeakyReLU activation functions
         bias
             Tells if the bias should be present inside the linear layers
+        init_zero
+            Tells if the last Linear layer should be initialized to zero
         """
         super().__init__()
 
