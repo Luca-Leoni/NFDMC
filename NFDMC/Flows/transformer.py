@@ -56,7 +56,7 @@ class Affine(Transformer):
         Tensor
             Untransformed variable
         """
-        return (z - h[:, 1]) * torch.exp(-h[:, 0])
+        return (z - h[:, 1::2]) * torch.exp(-h[:, ::2])
 
     def log_det(self, _: Tensor, h: Tensor) -> Tensor:
         r"""

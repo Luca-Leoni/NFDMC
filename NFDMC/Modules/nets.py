@@ -6,7 +6,7 @@ class RealMVP(nn.Module):
     """
     General network composed of linear layers and leaky ReLU activation functions
     """
-    def __init__(self, *dims: int, leaky: float = 0.0, bias: bool = True):
+    def __init__(self, *dims: int, leaky: float = 0.0, bias: bool = True, init_zero: bool = False):
         """
         Constructor
 
@@ -28,6 +28,10 @@ class RealMVP(nn.Module):
             net.append(nn.Linear(dims[i], dims[i+1], bias))
             net.append(nn.LeakyReLU(leaky))
         net.pop()
+
+        if init_zero:
+            nn.init.zeros_(net[-1].weight)
+            nn.init.zeros_(net[-1].bias)
 
         self._net = nn.Sequential(*net)
 
