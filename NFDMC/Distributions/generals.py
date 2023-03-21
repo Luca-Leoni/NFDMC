@@ -51,13 +51,8 @@ class MultiGaussian(Distribution):
         tuple[Tensor, Tensor]
             Tuple with batch of samples in the first tensor and log probabilities in the second
         """
-        if self._mean is None or self._std_dev is None:
-            raise TypeError()
-
-        z = torch.randn( (num_sample, self._dim), dtype=self._mean.dtype, device=self._mean.device)
-        z = self._mean + z * self._std_dev
-
-        return z, - 1.8378770664093453 - torch.log(torch.prod(self._std_dev)) - torch.sum(torch.pow((z - self._mean)/self._std_dev, 2), 1)/2
+        z = self.sample(num_sample)
+        return z, self.log_prob(z)
 
     def log_prob(self, z: Tensor) -> Tensor:
         """
@@ -73,10 +68,8 @@ class MultiGaussian(Distribution):
         Tensor
             Tensor with the log probabilities of the samples
         """
-        if self._std_dev is None:
-            raise TypeError()
-
-        return - 1.8378770664093453 - torch.log(torch.prod(self._std_dev)) - torch.sum(torch.pow((z - self._mean)/self._std_dev, 2), 1)/2
+                # log(sqrt(2*pi))
+        return - 0.9189385332046727 - torch.log(torch.prod(self._std_dev)) - torch.sum(torch.pow((z - self._mean)/self._std_dev, 2), 1)/2
 
     def sample(self, num_sample: int = 1) -> Tensor:
         """ 
@@ -92,13 +85,109 @@ class MultiGaussian(Distribution):
         Tensor
             Batch with the samples
         """
-        if self._mean is None or self._std_dev is None:
-            raise TypeError()
+        z = torch.randn( (num_sample, self._dim), dtype=self._mean.dtype, device=self._mean.device)
+        return self._mean + z * self._std_dev
 
-        mean    = self._mean.expand(num_sample, self._dim) 
-        std_dev = self._std_dev.expand(num_sample, self._dim)
+
+class MultiModalGaussian(Distribution):
+    """
+    Defines a Gaussian distribution composed of various multivariate gaussian distribution in the same space
+    """
+    def __init__(self, n_dim: int, n_mod: int, mean: Tensor | None = None, std_dev: Tensor | None = None, trainable: bool = True):
+        """
+        Constructor of the multimodal gaussian, takes as imputs the dimensions of the variable to generate and the number of modes wanted in the distribution.
+
+        Parameters
+        ----------
+        n_dim
+            Number of dimension of the random variable
+        n_mod
+            Number of multivariate Gaussians to take into account in the total one
+        mean
+            Possible initialization of the mean of the different gaussians as $[[\mu_1^1, \mu_1^2, \dots], [\mu_2^1, \dots], \dots]$ drawn randomly otherwise
+        std_dev
+            Possible initialization of the standard deviations equal to means if not inserted are initialized to ones
+        trainable
+            Tells if means and std_dev should be collexted as parameters
+        """
+        super().__init__()
+
+        self._n_dim = n_dim
+
+        if isinstance(mean, type(None)):
+            mean = 4*torch.rand(n_mod, n_dim) - 2
+
+        if isinstance(std_dev, type(None)):
+            std_dev = torch.ones(n_mod, n_dim)
+
+        if trainable:
+            self.mean = nn.Parameter(mean)
+            self.std_dev = nn.Parameter(std_dev)
+        else:
+            self.register_buffer("mean", mean)
+            self.register_buffer("std_dev", std_dev)
+
+    def forward(self, n_sample: int) -> tuple[Tensor, Tensor]:
+        """
+        Override of the torch.nn.Module methos
+
+        Draw a certain number of sample from the distribution and returns also the log probaility of them
+
+        Parameters
+        ----------
+        n_sample
+            Number of samples
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Samples drawn and log probability
+        """
+        z = self.sample(n_sample)
+        return z, self.log_prob(z)
+
+    def sample(self, num_sample: int = 1) -> Tensor:
+        """
+        Samples from the distribution
+
+        Parameters
+        ----------
+        num_sample
+            Number of samples to draw
+
+        Returns
+        -------
+        Tensor
+            Samples drawn
+        """
+        samples = torch.randn(num_sample, self._n_dim, dtype=self.mean.dtype, device=self.mean.device)
+        mode    = torch.randint(low=0, high=self.mean.shape[0], size=(num_sample,), device=self.mean.device)
+
+        samples = samples * self.std_dev[mode, :] + self.mean[mode, :]
+
+        return samples
+
+    def log_prob(self, z: Tensor) -> Tensor:
+        """
+        Computes the log probability of a Batch of samples
+
+        Parameters
+        ----------
+        z
+            Batch of samples
+
+        Returns
+        -------
+        Tensor
+            Log probabilities
+        """
         
-        return torch.normal(mean=mean, std=std_dev)
+        log_p = torch.zeros(z.shape[0], self.mean.shape[0], dtype=z.dtype, device=z.device)
+
+        for i in range(self.mean.shape[0]):
+            log_p[:, i] += -torch.sum(torch.pow((z - self.mean[i])/self.std_dev[i], 2), dim=1)/2
+                                              # log(sqrt(2 * pi))
+        return torch.logsumexp(log_p, dim=1) - 0.9189385332046727 - torch.log(torch.sum(torch.prod(self.std_dev, dim=1)))
 
 
 

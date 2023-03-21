@@ -144,14 +144,14 @@ class Manager(nn.Module):
         ValueError:
             If the target distribution is not given the target log probability can't be estimated
         """
-        if self._target is None:
+        if isinstance(self._target, type(None)):
             raise ValueError("The target distribution needs to be defined to perform reverse KLD measure!")
 
         z, mlog_p = self._base(num_sample)
         for flow in self._flows:
             z, log_det = flow(z)
-            mlog_p += log_det
+            mlog_p -= log_det
 
         tlog_p = self._target.log_prob(z)
 
-        return - torch.mean(tlog_p) - torch.mean(mlog_p)
+        return - torch.mean(tlog_p) + torch.mean(mlog_p)

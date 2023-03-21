@@ -82,6 +82,18 @@ class RSDistribution(Distribution):
     Version of the distribution primitive that automatically implements the sample method by using the rejection sampling algorithm
     """
     def __init__(self, n_dim: int, prop_scale: Tensor = torch.tensor(1.0), prop_shift: Tensor = torch.tensor(0.0)):
+        """
+        Constructor of the primitive class defining a probability distribution where the sampling is automatically implemented by using the rejection sampling method
+
+        Parameters
+        ----------
+        n_dim
+            Dimensions of the random variable under study
+        prop_scale
+            Proportionality used to define the range of the uniform distribution used for sampling $[0, prop_scale]^D$
+        prop_shift
+            Shift to translate the uniform distribution used for sampling becoming $[-prop_shift, prop_scale - prop_shift]^D$
+        """
         super().__init__()
 
         self._n_dim = n_dim
@@ -89,6 +101,19 @@ class RSDistribution(Distribution):
         self.register_buffer("_prop_shift", prop_shift)
 
     def sample(self, num_sample: int = 1) -> Tensor:
+        """
+        Default sampling method that uses the rejection sampling algorithm, it samples from a uniform distribution between $[-prop_shift, prop_scale - prop_shift]^D$ and then accept or reject the sample based on the log_prob of the samples drawn
+
+        Parameters
+        ----------
+        num_sample
+            Number of samples to drawn
+
+        Returns
+        -------
+        Tensor
+            Samples from target distribution
+        """
         samples = torch.zeros(0, self._n_dim, device=self._prop_scale.device) # pyright: ignore
 
         while samples.shape[0] < num_sample:

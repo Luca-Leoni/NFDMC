@@ -1,8 +1,9 @@
 import torch
 
-from NFDMC.Flows import Autoregressive
+from NFDMC.Flows import Autoregressive, Coupling
 from NFDMC.Flows.conditioner import MaskedConditioner
 from NFDMC.Flows.transformer import Affine
+from NFDMC.Modules.nets import RealMVP
 
 from hypothesis import given, settings, strategies as st
 
@@ -49,6 +50,29 @@ def test_Affine_transformer(var_dim, layers):
     assert z2.shape == (5, var_dim)
     assert log_det.shape == (5,)
     assert torch.isclose(z2, z).all()
+
+
+@settings(deadline=5000)
+@given(var_dim=st.integers(min_value=2, max_value=100),
+       num_sample=st.integers(min_value=1, max_value=1000))
+def test_Affine_Coupling(var_dim, num_sample):
+    """
+    Check dimensions of the net and the fact that the inverse is really an inverse
+    """
+    split = [var_dim // 2, var_dim - (var_dim // 2)]
+    flow = Coupling(Affine(), RealMVP(split[0], 30, 30, 2 * split[1]), split=split).to("cuda")
+
+    z = torch.rand(num_sample, var_dim, device="cuda")
+    z1, log_det = flow(z)
+
+    assert z1.shape == (num_sample, var_dim)
+    assert log_det.shape == (num_sample,)
+
+    z2, log_det = flow.inverse(z1)
+    
+    assert z2.shape == (num_sample, var_dim)
+    assert log_det.shape == (num_sample,)
+    assert torch.isclose(z2, z, rtol=0.00005).all()
 
 #--------------------------------
 

@@ -3,7 +3,6 @@ import torch
 from ..Archetypes import Flow, Transformer, Conditioner
 from torch import Tensor
 from torch.nn import Module
-from typing import Callable
 
 #------------------------------
 
@@ -70,12 +69,12 @@ class Autoregressive(Flow):
         tuple[Tensor, Tensor]
             Untransformed variable and log determinant of the inverse transformation
         """
-        h = self.__cond(torch.clone(z)) # TODO: find a way to avoid those cloning
+        h = self.__cond(z) # TODO: find a way to avoid those cloning
 
         for i in range(z.shape[1]):
             z[:, i] = self.__trans.inverse(z[:,i].reshape(z.shape[0], 1), 
                                            h[:, self.__trans.trans_features * i: self.__trans.trans_features * i + 2]).flatten()
-            h = self.__cond(torch.clone(z))
+            h = self.__cond(z)
 
         return z, -self.__trans.log_det(z, h)
 
