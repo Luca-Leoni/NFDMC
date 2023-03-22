@@ -10,4 +10,4 @@ from .regressive import Conditioner
 from .regressive import Transformer
 
 # Archetipes for dmc
-from .dmc import DiaModule
+from .dmc import Diagrammatic

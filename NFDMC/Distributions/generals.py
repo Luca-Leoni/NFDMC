@@ -94,7 +94,7 @@ class MultiModalGaussian(Distribution):
     Defines a Gaussian distribution composed of various multivariate gaussian distribution in the same space
     """
     def __init__(self, n_dim: int, n_mod: int, mean: Tensor | None = None, std_dev: Tensor | None = None, trainable: bool = True):
-        """
+        r"""
         Constructor of the multimodal gaussian, takes as imputs the dimensions of the variable to generate and the number of modes wanted in the distribution.
 
         Parameters
