@@ -2,11 +2,13 @@ import torch
 
 from torch import Tensor
 
+#--------------------------------
+
 class Diagrammatic:
     """
     Archetipe class that is needed in order to define the diagram that we are going to use in the computation and track the position of the different types of variables as it gets transformed
     """
-    __block_lenghts = torch.tensor([])
+    __block_lenghts = torch.tensor([], dtype=torch.long)
     __block_name    = dict()
 
     def __init__(self):
@@ -32,7 +34,7 @@ class Diagrammatic:
             Lenght of the block in the data vector
         """
         Diagrammatic.__block_name[name] = len(Diagrammatic.__block_lenghts)
-        Diagrammatic.__block_lenghts = torch.cat( (Diagrammatic.__block_lenghts, torch.tensor([lenght])) )
+        Diagrammatic.__block_lenghts = torch.cat( (Diagrammatic.__block_lenghts, torch.tensor([int(lenght)], dtype=torch.long)))
 
 
 
@@ -41,12 +43,24 @@ class Diagrammatic:
         """
         Clear the static internal variables that defines the composition, restart from zero.
         """
-        Diagrammatic.__block_lenghts = torch.tensor([])
+        Diagrammatic.__block_lenghts = torch.tensor([], dtype=torch.long)
         Diagrammatic.__block_name    = dict()
 
-    
     @staticmethod
-    def get_dia_comp() -> Tensor:
+    def print_comp():
+        """
+        Function to print the diagram composition to standard output in a, hopefully, preaty table format.
+        """
+        dia_comp = Diagrammatic().get_dia_comp()
+
+        print("{:^10} | {:^10} | {:^10}".format("BLOCK NAME", "START", "END"))
+        print("{:-^36}".format("-"))
+        for i, name in enumerate(Diagrammatic.__block_name):
+            print("{:<10} | {:<10} | {:<10}".format(name, dia_comp[i, 0], dia_comp[i, 1]))
+        print("{:-^36}".format("-"))
+
+ 
+    def get_dia_comp(self) -> Tensor:
         """
         Computes the diagram composition in that moment generating a 2D array composed in the following way:
             [[beg_idx_1, end_idx_1],
@@ -59,7 +73,7 @@ class Diagrammatic:
         Tensor
             2D array containing informations of begin and end of the different blocks
         """
-        dia_comp = torch.zeros(Diagrammatic.__block_lenghts.shape[0], 2)
+        dia_comp = torch.zeros(Diagrammatic.__block_lenghts.shape[0], 2, dtype=torch.long)
         
         dia_comp[0,1] = Diagrammatic.__block_lenghts[0]
         
@@ -69,6 +83,7 @@ class Diagrammatic:
             dia_comp[i, 1] = dia_comp[i, 0] + Diagrammatic.__block_lenghts[i]
 
         return dia_comp[list(Diagrammatic.__block_name.values()), :]
+
 
 
     def swap_blocks(self, block1: str, block2: str):

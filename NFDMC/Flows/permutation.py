@@ -3,6 +3,8 @@ import torch
 from torch import Tensor
 from ..Archetypes import Flow, Diagrammatic
 
+#-----------------------------------
+
 class PermuteRandom(Flow):
     """
     Flows that randomly permutes the elements inside the input variables
@@ -123,7 +125,7 @@ class PermuteTimeBlock(Flow, Diagrammatic):
 
         block = self.get_block(block_name)
 
-        self.__n_couple = (self.get_dia_comp()[block][1] - self.get_dia_comp()[block][0]).data.numpy() // 2
+        self.__n_couple = int(self.get_dia_comp()[block][1] - self.get_dia_comp()[block][0]) // 2
 
         self.__b = block
         self.__permutation = torch.randperm(self.__n_couple)
@@ -145,13 +147,13 @@ class PermuteTimeBlock(Flow, Diagrammatic):
         tuple[Tensor, Tensor]
             Shuffled diagrams and log det of the permutation, so zero
         """
-        comp = Diagrammatic.get_dia_comp()
+        comp = self.get_dia_comp()
         start = comp[self.__b, 0]
         end   = comp[self.__b, 1]
 
-        times = z[:, start:end].reshape(self.__n_couple, 2)
+        times = z[:, start:end].reshape(z.shape[0], self.__n_couple, 2)
 
-        z[:, start:end] = times[self.__permutation, :].flatten()
+        z[:, start:end] = times[:, self.__permutation, :].flatten(start_dim=1)
 
         return z, torch.zeros(z.shape[0], device=z.device)
 
@@ -169,15 +171,18 @@ class PermuteTimeBlock(Flow, Diagrammatic):
         tuple[Tensor, Tensor]
              Shuffled diagrams and log det of the permutation, so zero
         """
-        comp = Diagrammatic.get_dia_comp()
+        comp = self.get_dia_comp()
         start = comp[self.__b, 0]
         end   = comp[self.__b, 1]
 
-        times = z[:, start:end].reshape(self.__n_couple, 2)
+        times = z[:, start:end].reshape(z.shape[0], self.__n_couple, 2)
 
-        z[:, start:end] = times[self.__inverse, :].flatten()
+        z[:, start:end] = times[:, self.__inverse, :].flatten(start_dim=1)
 
         return z, torch.zeros(z.shape[0], device=z.device)
+
+    def get_permutation(self) -> Tensor:
+        return self.__permutation
 
 
 class SwapDiaBlock(Flow, Diagrammatic):
@@ -220,7 +225,7 @@ class SwapDiaBlock(Flow, Diagrammatic):
         tuple[Tensor, Tensor]
             Shuffled diagrams and log det of the permutation, so zero
         """
-        split_ord = Diagrammatic.get_dia_comp()[self.__b].flatten().msort().roll(-1)
+        split_ord = self.get_dia_comp()[self.__b].flatten().msort()
 
         zb = z[:, :split_ord[0]]
         z1 = z[:, split_ord[0]:split_ord[1]]

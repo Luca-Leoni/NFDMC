@@ -1,8 +1,22 @@
 import torch
+import numpy as np
 
 from NFDMC.Archetypes import Diagrammatic
 from NFDMC.Distributions import diagrams
+from NFDMC.Flows.permutation import SwapDiaBlock, PermuteTimeBlock
 from hypothesis import given, settings, strategies as st
+
+#---------------------------------------------
+
+def check_if_a_in_b(a, b) -> bool:
+    present = False
+    for element in b:
+        if (a == element).all():
+            present = True
+
+    return present
+
+#---------------------------------------------
 
 @given(st.integers(min_value=2, max_value=100).filter(lambda x: not x % 2))
 def test_Holstein(max_order: int):
@@ -38,7 +52,7 @@ def test_diagrammatic_initialization(n_blocks):
     for i in range(n_blocks):
         Diagrammatic.add_block(f"block{i}", lenghts[i])
 
-    dia_comp = Diagrammatic.get_dia_comp()
+    dia_comp = Diagrammatic().get_dia_comp()
     Diagrammatic.clear()
 
     assert (dia_comp == comp).all()
@@ -53,14 +67,14 @@ def test_diagrammatic_swap():
 
     Diagrammatic().swap_blocks(f"block0", f"block2")
 
-    print(Diagrammatic.get_dia_comp())
+    print(Diagrammatic().get_dia_comp())
 
     result = torch.tensor([[130, 131],
                            [30, 130],
                            [0, 30],
                            [131, 143]])
 
-    assert (Diagrammatic.get_dia_comp() == result).all()
+    assert (Diagrammatic().get_dia_comp() == result).all()
 
     Diagrammatic().swap_blocks("block1", "block0")
 
@@ -69,7 +83,121 @@ def test_diagrammatic_swap():
                            [0, 30],
                            [131, 143]])
 
-    assert (Diagrammatic.get_dia_comp() == result).all()
+    assert (Diagrammatic().get_dia_comp() == result).all()
+
+
+@given(batch=st.integers(min_value=1, max_value=10),
+        block=st.integers(min_value=0, max_value=9))
+def test_time_permutation(batch, block):
+    Diagrammatic.clear()
+
+    # Generate composition
+    lenghts = torch.randint(low=2, high=50, size=(10,)).data.numpy() * 2
+    for i in range(10):
+        Diagrammatic.add_block(f"block{i}", lenghts[i])
+
+    diagrams = torch.arange(np.sum(lenghts)*batch).reshape(batch, np.sum(lenghts))
+
+    #Do the thing
+    permute = PermuteTimeBlock(f"block{block}").to("cuda")
+ 
+    permuted, _ = permute(diagrams)
+    inverted, _ = permute.inverse(permute(diagrams)[0])
+
+    start = np.sum(lenghts[:block])
+    end   = start + lenghts[block]
+    per_block = diagrams[:, start:end].reshape(batch, lenghts[block] // 2, 2) 
+
+    permuted = permuted[:, start:end]
+    permuted = permuted.reshape(batch, lenghts[block] // 2, 2)
+
+    for i, couples in enumerate(per_block):
+        for couple in couples:
+            assert check_if_a_in_b(couple, permuted[i])
+    assert (inverted == diagrams).all()
+
+
+@given(batch=st.integers(min_value=1, max_value=10),
+        block1=st.integers(min_value=0, max_value=9),
+        block2=st.integers(min_value=0, max_value=9))
+def test_time_swap(batch, block1, block2):
+    if block1 == block2:
+        return
+
+    Diagrammatic.clear()
+
+    # I want block1 to be before the two for simplicity in terms of testing
+    if block1 > block2:
+        block1, block2 = block2, block1
+
+    # Generate composition
+    lenghts = torch.randint(low=2, high=10, size=(10,)).data.numpy() * 2
+    for i in range(10):
+        Diagrammatic.add_block(f"block{i}", lenghts[i])
+
+    diagrams = torch.arange(np.sum(lenghts)*batch).reshape(batch, np.sum(lenghts))
+
+    # Do the thing
+    swap = SwapDiaBlock(f"block{block1}", f"block{block2}")
+
+    permuted, _ = swap(diagrams)
+    inverted, _ = swap.inverse(torch.clone(permuted))
+    
+    start1 = np.sum(lenghts[:block1])
+    start2 = np.sum(lenghts[:block2])
+    end1 = start1 + lenghts[block1]
+    end2 = start2 + lenghts[block2]
+
+    b1 = diagrams[:, start1:end1]
+    b2 = diagrams[:, start2:end2]
+
+    assert (b2 == permuted[:, start1:start1 + lenghts[block2]]).all()
+    assert (b1 == permuted[:, start2 - lenghts[block1] + lenghts[block2]:start2 + lenghts[block2]]).all()
+    assert (inverted == diagrams).all()
+
+
+@given(batch=st.integers(min_value=1, max_value=10),
+        block1=st.integers(min_value=0, max_value=9),
+        block2=st.integers(min_value=0, max_value=9))
+def test_time_swap_permute(batch, block1, block2):
+    if block1 == block2:
+        return
+
+    Diagrammatic.clear()
+
+    # I want block1 to be before the two for simplicity in terms of testing
+    if block1 > block2:
+        block1, block2 = block2, block1
+
+    # Generate composition
+    lenghts = torch.randint(low=2, high=10, size=(10,)).data.numpy() * 2
+    for i in range(10):
+        Diagrammatic.add_block(f"block{i}", lenghts[i])
+
+    diagrams = torch.arange(np.sum(lenghts)*batch).reshape(batch, np.sum(lenghts))
+
+    # Do the thing
+    swap = SwapDiaBlock(f"block{block1}", f"block{block2}")
+    permute = PermuteTimeBlock(f"block{block2}")
+
+    permuted, _ = permute(swap(diagrams)[0])
+    inverted, _ = permute.inverse(swap.inverse(torch.clone(permuted))[0])
+
+    start = np.sum(lenghts[:block2])
+    end   = start + lenghts[block2]
+    per_block = diagrams[:, start:end].reshape(batch, lenghts[block2] // 2, 2)
+
+    start = np.sum(lenghts[:block1])
+    end   = start + lenghts[block2]
+    permuted = permuted[:, start:end]
+    permuted = permuted.reshape(batch, lenghts[block2] // 2, 2)
+    
+    for i, couples in enumerate(per_block):
+        for couple in couples:
+            assert check_if_a_in_b(couple, permuted[i])
+    assert (inverted == diagrams).all()
+
+#--------------------------------------
 
 if __name__ == '__main__':
     test_diagrammatic_initialization()

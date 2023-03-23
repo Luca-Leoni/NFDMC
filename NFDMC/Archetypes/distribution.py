@@ -3,6 +3,8 @@ import torch.nn as nn
 
 from torch import Tensor
 
+#------------------------------------
+
 class Distribution(nn.Module):
     """
     Archetipe of a probability distribution inside the model

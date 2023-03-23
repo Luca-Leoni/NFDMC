@@ -4,6 +4,8 @@ import torch.nn as nn
 from torch import Tensor
 from ..Archetypes import Distribution, RSDistribution
 
+#---------------------------------
+
 class MultiGaussian(Distribution):
     """
     Multivariate Gaussian distribution with diagonal covariance matrix for generating a D dimensional vector with entries composed of independent Gaussian variables.

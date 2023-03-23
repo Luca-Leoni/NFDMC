@@ -4,6 +4,8 @@ import math
 from torch import Tensor
 from ..Archetypes import Distribution, RSDistribution
 
+#---------------------------------------
+
 class Holstein(Distribution):
     def __init__(self, on_site: float, phonon: float, coupling: float):
         r"""
