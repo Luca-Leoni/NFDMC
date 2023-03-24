@@ -11,3 +11,4 @@ from .regressive import Transformer
 
 # Archetipes for dmc
 from .dmc import Diagrammatic
+from .dmc import block_types

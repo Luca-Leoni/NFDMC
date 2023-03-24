@@ -1,6 +1,6 @@
 import torch
 
-from ..Archetypes import Transformer
+from ..Archetypes import Transformer, Diagrammatic
 from torch import Tensor
 
 #-------------------------------

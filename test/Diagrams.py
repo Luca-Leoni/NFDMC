@@ -1,9 +1,10 @@
 import torch
 import numpy as np
 
-from NFDMC.Archetypes import Diagrammatic
+from NFDMC.Archetypes import Diagrammatic, block_types
 from NFDMC.Distributions import diagrams
 from NFDMC.Flows.permutation import SwapDiaBlock, PermuteTimeBlock
+from NFDMC.Flows.dmc import DiaChecker
 from hypothesis import given, settings, strategies as st
 
 #---------------------------------------------
@@ -50,7 +51,7 @@ def test_diagrammatic_initialization(n_blocks):
         comp[i,1] = comp[i,0] + lenghts[i]
 
     for i in range(n_blocks):
-        Diagrammatic.add_block(f"block{i}", lenghts[i])
+        Diagrammatic.add_block(f"block{i}", lenghts[i], block_types.tm_ordered)
 
     dia_comp = Diagrammatic().get_dia_comp()
     Diagrammatic.clear()
@@ -62,7 +63,7 @@ def test_diagrammatic_swap():
     lenghts = [1, 100, 30, 12]
 
     for i in range(len(lenghts)):
-        Diagrammatic.add_block(f"block{i}", lenghts[i])
+        Diagrammatic.add_block(f"block{i}", lenghts[i], block_types.tm_ordered)
 
 
     Diagrammatic().swap_blocks(f"block0", f"block2")
@@ -94,7 +95,7 @@ def test_time_permutation(batch, block):
     # Generate composition
     lenghts = torch.randint(low=2, high=50, size=(10,)).data.numpy() * 2
     for i in range(10):
-        Diagrammatic.add_block(f"block{i}", lenghts[i])
+        Diagrammatic.add_block(f"block{i}", lenghts[i], block_types.tm_ordered)
 
     diagrams = torch.arange(np.sum(lenghts)*batch).reshape(batch, np.sum(lenghts))
 
@@ -133,7 +134,7 @@ def test_time_swap(batch, block1, block2):
     # Generate composition
     lenghts = torch.randint(low=2, high=10, size=(10,)).data.numpy() * 2
     for i in range(10):
-        Diagrammatic.add_block(f"block{i}", lenghts[i])
+        Diagrammatic.add_block(f"block{i}", lenghts[i], block_types.tm_ordered)
 
     diagrams = torch.arange(np.sum(lenghts)*batch).reshape(batch, np.sum(lenghts))
 
@@ -172,7 +173,7 @@ def test_time_swap_permute(batch, block1, block2):
     # Generate composition
     lenghts = torch.randint(low=2, high=10, size=(10,)).data.numpy() * 2
     for i in range(10):
-        Diagrammatic.add_block(f"block{i}", lenghts[i])
+        Diagrammatic.add_block(f"block{i}", lenghts[i], block_types.tm_ordered)
 
     diagrams = torch.arange(np.sum(lenghts)*batch).reshape(batch, np.sum(lenghts))
 
@@ -196,6 +197,63 @@ def test_time_swap_permute(batch, block1, block2):
         for couple in couples:
             assert check_if_a_in_b(couple, permuted[i])
     assert (inverted == diagrams).all()
+
+
+@given(batch=st.integers(min_value=1, max_value=100),
+       block1=st.integers(min_value=0, max_value=3),
+       block2=st.integers(min_value=0, max_value=3))
+def test_dia_checker(batch, block1, block2):
+    Diagrammatic.clear()
+
+    lenghts = torch.randint(low=1, high=10, size=(4,), dtype=torch.long).data.numpy() * 2
+    types   = [block_types.integer, block_types.floating, block_types.tm_ordered, block_types.floating]
+
+    for i in range(4):
+        Diagrammatic.add_block(f"block{i}", int(lenghts[i]), types[i])
+
+    z = torch.rand(size=(batch, int(np.sum(lenghts)))) * 3
+
+    dia_check = DiaChecker()
+
+    diagrams, _ = SwapDiaBlock(f"block{block1}", f"block{block2}")(z)
+    diagrams, _ = dia_check(z)
+
+    dia_comp = Diagrammatic().get_dia_comp()
+    # assert (diagrams[:, dia_comp[0,0]:dia_comp[0,1]] == torch.floor(diagrams[:, dia_comp[0,0]:dia_comp[0,1]])).all()
+    assert (diagrams[:, dia_comp[0,0]:dia_comp[0,1]] == z[:, dia_comp[0,0]:dia_comp[0,1]]).all()
+    assert (diagrams[:, dia_comp[1,0]:dia_comp[1,1]] == z[:, dia_comp[1,0]:dia_comp[1,1]]).all()
+    assert (diagrams[:, dia_comp[2,0]:dia_comp[2,1]:2] < diagrams[:, dia_comp[2,0]+1:dia_comp[2,1]:2]).all()
+
+
+@given(batch=st.integers(min_value=1, max_value=100),
+       block1=st.integers(min_value=0, max_value=3),
+       block2=st.integers(min_value=0, max_value=3))
+def test_dia_checker_last(batch, block1, block2):
+    Diagrammatic.clear()
+
+    lenghts = torch.randint(low=1, high=10, size=(4,), dtype=torch.long).data.numpy() * 2
+    types   = [block_types.integer, block_types.floating, block_types.tm_ordered, block_types.floating]
+
+    for i in range(4):
+        Diagrammatic.add_block(f"block{i}", int(lenghts[i]), types[i])
+    init_comp = Diagrammatic().get_dia_comp()
+
+    z = torch.rand(size=(batch, int(np.sum(lenghts)))) * 3
+
+
+    dia_check = DiaChecker(last=True)
+
+    diagrams, _ = SwapDiaBlock(f"block{block1}", f"block{block2}")(z)
+    diagrams, _ = dia_check(diagrams)
+
+
+    dia_comp = Diagrammatic().get_dia_comp()
+    assert (init_comp == dia_comp).all()
+    assert (diagrams[:, dia_comp[0,0]:dia_comp[0,1]] == torch.floor(diagrams[:, dia_comp[0,0]:dia_comp[0,1]])).all()
+    assert (diagrams[:, dia_comp[1,0]:dia_comp[1,1]] == z[:, dia_comp[1,0]:dia_comp[1,1]]).all()
+    assert (diagrams[:, dia_comp[2,0]:dia_comp[2,1]:2] < diagrams[:, dia_comp[2,0]+1:dia_comp[2,1]:2]).all()
+
+
 
 #--------------------------------------
 

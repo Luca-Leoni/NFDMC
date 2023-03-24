@@ -1,15 +1,35 @@
 import torch
 
 from torch import Tensor
+from enum import Enum
 
 #--------------------------------
+
+class block_types(Enum):
+    """
+    Enumerate class used in order to define the possible types of the blocks inside a diagram, the different diagramattic flows may need to act in different ways with different type of blocks.
+
+    Attributes
+    ----------
+    integer
+        The block contains integers value, normaly used for the block containing the order
+    floating
+        The block contains floating value, normaly used for block containing the time of flight of the particle
+    tm_ordered
+        The block contains a series of time ordered couples of creation and anhilation times
+    """
+    integer = "integer"
+    floating = "floating"
+    tm_ordered = "tm_ordered"
 
 class Diagrammatic:
     """
     Archetipe class that is needed in order to define the diagram that we are going to use in the computation and track the position of the different types of variables as it gets transformed
     """
     __block_lenghts = torch.tensor([], dtype=torch.long)
+    __block_types   = []
     __block_name    = dict()
+
 
     def __init__(self):
         """
@@ -20,7 +40,7 @@ class Diagrammatic:
         super().__init__()
 
     @staticmethod
-    def add_block(name: str, lenght: int):
+    def add_block(name: str, lenght: int, type: block_types):
         """
         Add a block to the diagram definition
 
@@ -32,9 +52,12 @@ class Diagrammatic:
             Name of the block stored
         lenght
             Lenght of the block in the data vector
+        type
+            Type of the block inserted
         """
         Diagrammatic.__block_name[name] = len(Diagrammatic.__block_lenghts)
         Diagrammatic.__block_lenghts = torch.cat( (Diagrammatic.__block_lenghts, torch.tensor([int(lenght)], dtype=torch.long)))
+        Diagrammatic.__block_types.append(type)
 
 
 
@@ -44,6 +67,7 @@ class Diagrammatic:
         Clear the static internal variables that defines the composition, restart from zero.
         """
         Diagrammatic.__block_lenghts = torch.tensor([], dtype=torch.long)
+        Diagrammatic.__block_types.clear()
         Diagrammatic.__block_name    = dict()
 
     @staticmethod
@@ -53,11 +77,11 @@ class Diagrammatic:
         """
         dia_comp = Diagrammatic().get_dia_comp()
 
-        print("{:^10} | {:^10} | {:^10}".format("BLOCK NAME", "START", "END"))
-        print("{:-^36}".format("-"))
+        print("{:^10} | {:^10} | {:^10} | {:^10}".format("BLOCK NAME", "START", "END", "TYPE"))
+        print("{:-^49}".format("-"))
         for i, name in enumerate(Diagrammatic.__block_name):
-            print("{:<10} | {:<10} | {:<10}".format(name, dia_comp[i, 0], dia_comp[i, 1]))
-        print("{:-^36}".format("-"))
+            print("{:<10} | {:<10} | {:<10} | {:^10}".format(name, dia_comp[i, 0], dia_comp[i, 1], Diagrammatic.__block_types[i].value))
+        print("{:-^49}".format("-"))
 
  
     def get_dia_comp(self) -> Tensor:
@@ -84,6 +108,24 @@ class Diagrammatic:
 
         return dia_comp[list(Diagrammatic.__block_name.values()), :]
 
+    def get_block_types(self) -> list[block_types]:
+        return Diagrammatic.__block_types
+
+    def get_block_type(self, block: str) -> block_types:
+        """
+        Gets the type of a wanted block
+
+        Parameters
+        ----------
+        block
+            Name of the interested block
+
+        Returns
+        -------
+        block_types
+            Type of the block
+        """
+        return Diagrammatic.__block_types[self.get_block(block)]
 
 
     def swap_blocks(self, block1: str, block2: str):
@@ -160,3 +202,10 @@ class Diagrammatic:
                 return i
 
         raise RuntimeError("Something bad has happened :(")
+
+
+    def set_initial_comp(self):
+        Diagrammatic.__block_lenghts = Diagrammatic.__block_lenghts[list(Diagrammatic.__block_name.values())]
+
+        for i, name in enumerate(Diagrammatic.__block_name):
+            Diagrammatic.__block_name[name] = i

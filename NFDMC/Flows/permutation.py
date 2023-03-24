@@ -1,7 +1,8 @@
 import torch
 
 from torch import Tensor
-from ..Archetypes import Flow, Diagrammatic
+
+from ..Archetypes import Flow, Diagrammatic, block_types
 
 #-----------------------------------
 
@@ -249,5 +250,75 @@ class SwapDiaBlock(Flow, Diagrammatic):
         -------
         tuple[Tensor, Tensor]
             Shuffled diagrams and log det of the permutation, so zero
+        """
+        return self.forward(z)
+
+
+class SwapTimeBlock(Flow, Diagrammatic):
+    """
+    Permutation diagrammatic flow that allows to swap the couples inside a time block
+    """
+    def __init__(self, block_name: str):
+        """
+        Constructor
+
+        Construct a permutation diagrammatic flow that flips the couples iside a time ordered block
+
+        Parameters
+        ----------
+        block_name
+            Name of the block
+
+        Raises
+        ------
+        KeyError:
+            If the block selected is not a time ordered one
+        """
+        super().__init__()
+
+        if self.get_block_type(block_name) != block_types.tm_ordered:
+            raise KeyError(f"{block_name} is not a time ordered block so I can't swap couples inside it!")
+
+        self.__b = self.get_block(block_name)
+        self.__n_couple = int(self.get_dia_comp()[self.__b][1] - self.get_dia_comp()[self.__b][0]) // 2
+
+    def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Override of the torch.nn.Module method
+
+        Swaps the couples in the selected block
+
+        Parameters
+        ----------
+        z
+            Batch of diagrams
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Swaped batch and log det of the permutation, so zero
+        """
+        dia_comp = self.get_dia_comp()
+
+        block = z[:, dia_comp[self.__b,0]:dia_comp[self.__b,1]].reshape(z.shape[0], self.__n_couple, 2)
+        block = torch.flip(block, dims=(1,)).flatten(start_dim=1)
+
+        z[:, dia_comp[self.__b,0]:dia_comp[self.__b,1]] = block
+
+        return z, torch.zeros(z.shape[0], device=z.device)
+
+    def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Inverse of the transformation, that in this case is the transformation itself
+
+        Parameters
+        ----------
+        z
+            Batch of diagrams
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Swapped batch with log det of the permutation, so zero
         """
         return self.forward(z)
