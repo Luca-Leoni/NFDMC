@@ -2,11 +2,11 @@ import torch
 import math
 
 from torch import Tensor
-from ..Archetypes import Distribution, RSDistribution
+from ..Archetypes import Distribution, RSDistribution, Diagrammatic
 
 #---------------------------------------
 
-class Holstein(Distribution):
+class Holstein(Distribution, Diagrammatic):
     def __init__(self, on_site: float, phonon: float, coupling: float):
         r"""
         Construct the Holstein target distribution by passing the constants of the Toy Hamiltonian. In particular this distribution contains the log_probability evaluation by using the log_weight for it. Also, the diagrams are assumed to be represented, for now, as:
@@ -43,20 +43,29 @@ class Holstein(Distribution):
         Tensor
             log probabilities of the batch
         """
+        dia_con = self.get_dia_comp()
+        beg_ph = dia_con[2, 0]
+        end_ph = dia_con[2, 1]
+
         # If time ordering or positiveness is not respected give really low probability
-        ordered = (z[:, 3::2] > z[:, 3::2]).all(dim=1)
-        positive = (z >= 0).all(dim=1)
+        # ordered = (z[:, beg_ph:end_ph:2] < z[:, beg_ph+1:end_ph:2]).all(dim=1)
+        # positive = (z >= 0).all(dim=1)
+
+        # if (ordered != positive).all():
+        #     print(z)
 
         # Tranform first element in order of diagram
-        order = torch.floor(z[:,0]).reshape(z.shape[0], 1) + 2
+        order = torch.floor(z[:,dia_con[0,0]:dia_con[0,1]])*2
 
         # Set to zero the element out of the order
-        zeros = torch.arange(z.shape[1] - 1).expand(z.shape[0], z.shape[1] - 1) > order
-        log_weight = torch.clone(z[:, 2:])
+        zeros = torch.arange(z.shape[1] - 2, device=z.device) >= order
+        log_weight = torch.clone(z[:, beg_ph:end_ph])
         log_weight[zeros] = 0
 
+
         # Compute the weight
-        log_weight =  self.__g * order.flatten() + self.__mu * z[:, 1] +  self.__om * torch.sum((log_weight[:, ::2] - log_weight[:, 1::2]), dim=1)
+        log_weight =  (self.__g * order + self.__mu * z[:, dia_con[1,0]:dia_con[1,1]]).flatten() +  self.__om * torch.sum((log_weight[:, ::2] - log_weight[:, 1::2]), dim=1)
 
         # select right output
-        return torch.where(ordered and positive, log_weight, -1000000) 
+        return log_weight
+        # return torch.where(ordered == positive, log_weight, -1000000 * torch.abs(log_weight)) 

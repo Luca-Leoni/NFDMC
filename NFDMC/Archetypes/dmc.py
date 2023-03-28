@@ -109,6 +109,14 @@ class Diagrammatic:
         return dia_comp[list(Diagrammatic.__block_name.values()), :]
 
     def get_block_types(self) -> list[block_types]:
+        """
+        Gets the all list with the block types of the different blocks in order
+
+        Returns
+        -------
+        list[block_types]
+            List with the block types
+        """
         return Diagrammatic.__block_types
 
     def get_block_type(self, block: str) -> block_types:
@@ -147,6 +155,21 @@ class Diagrammatic:
 
         Diagrammatic.__block_lenghts[pos1], Diagrammatic.__block_lenghts[pos2] = lenghts[pos2], lenghts[pos1] 
         Diagrammatic.__block_name[block1], Diagrammatic.__block_name[block2] = Diagrammatic.__block_name[block2], Diagrammatic.__block_name[block1]
+
+
+    def flip_dia_comp(self):
+        """
+        Flips the composition of the diagram due to a possible flip in the vector describing the diagrams
+        """
+        Diagrammatic.__block_lenghts = torch.flip(Diagrammatic.__block_lenghts, dims=(0,))
+
+        size  = len(Diagrammatic.__block_name)
+        items = Diagrammatic.__block_name.copy().items()
+
+        for value in range(size):
+            for name, pos in items:
+                if pos == size - value - 1:
+                    Diagrammatic.__block_name[name] = value
 
 
     def get_block_pos(self, name: str) -> int:
@@ -205,6 +228,9 @@ class Diagrammatic:
 
 
     def set_initial_comp(self):
+        """
+        Set back the composition to its original form basically eliminating all the block swaps that have been done so far, it's still not able to eliminate the swaps or permutations done internally inside the blocks.
+        """
         Diagrammatic.__block_lenghts = Diagrammatic.__block_lenghts[list(Diagrammatic.__block_name.values())]
 
         for i, name in enumerate(Diagrammatic.__block_name):

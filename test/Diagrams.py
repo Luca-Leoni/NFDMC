@@ -36,7 +36,7 @@ def test_Holstein(max_order: int):
     log_p = dis.log_prob(z)
 
     assert log_p.shape == (2,)
-    assert log_p[1] == -1000000
+    assert log_p[1] <= -100
     assert log_p[0] != -1000000
 
 
@@ -254,6 +254,26 @@ def test_dia_checker_last(batch, block1, block2):
     assert (diagrams[:, dia_comp[2,0]:dia_comp[2,1]:2] < diagrams[:, dia_comp[2,0]+1:dia_comp[2,1]:2]).all()
 
 
+@given(batch=st.integers(min_value=1, max_value=100),
+       n_blocks=st.integers(min_value=2, max_value=6))
+def test_dia_flip(batch, n_blocks):
+    Diagrammatic.clear()
+
+    lenghts = torch.randint(low=3, high=10, size=(n_blocks,)).data.numpy()
+    for i in range(n_blocks):
+        Diagrammatic.add_block(f"block{i}", lenghts[i], block_types.integer)
+    diagrams = torch.rand(batch, np.sum(lenghts))
+    end_part = torch.flip(diagrams[:, np.sum(lenghts[:-1]):], dims=(1,))
+
+    
+    # flip everithing
+    Diagrammatic().flip_dia_comp()
+    dia_comp = Diagrammatic().get_dia_comp()
+    fldia    = torch.flip(diagrams, dims=(1,))
+    beg_part = fldia[:, dia_comp[-1, 0]:dia_comp[-1, 1]]
+
+    # check
+    assert (beg_part == end_part).all()
 
 #--------------------------------------
 

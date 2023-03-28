@@ -58,15 +58,15 @@ class PermuteRandom(Flow):
         return z[:, self._per_inv], torch.zeros(z.shape[0], device=z.device)
 
 
-class Swap(Flow):
+class Flip(Flow):
     """
-    Simple permuation flow that swaps the entries inside the random variable
+    Simple permuation flow that flips the entries inside the random variable
     """
     def __init__(self):
         """
         Constructor
 
-        A permutation flow that swaps the entries inside the random variable
+        A permutation flow that flips the entries inside the random variable
         """
         super().__init__()
 
@@ -90,7 +90,7 @@ class Swap(Flow):
 
     def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]:
         """
-        Inverse of the swapping, which is the swapping itself
+        Inverse of the swapping, which is the flipping itself
 
         Parameters
         ----------
@@ -254,15 +254,15 @@ class SwapDiaBlock(Flow, Diagrammatic):
         return self.forward(z)
 
 
-class SwapTimeBlock(Flow, Diagrammatic):
+class FlipTimeBlock(Flow, Diagrammatic):
     """
-    Permutation diagrammatic flow that allows to swap the couples inside a time block
+    Permutation diagrammatic flow that allows to flip the couples inside a time block
     """
     def __init__(self, block_name: str):
         """
         Constructor
 
-        Construct a permutation diagrammatic flow that flips the couples iside a time ordered block
+        Construct a permutation diagrammatic flow that flips the position of the couples inside a time ordered block
 
         Parameters
         ----------
@@ -286,7 +286,7 @@ class SwapTimeBlock(Flow, Diagrammatic):
         """
         Override of the torch.nn.Module method
 
-        Swaps the couples in the selected block
+        Flip the couples position in the selected block
 
         Parameters
         ----------
@@ -320,5 +320,55 @@ class SwapTimeBlock(Flow, Diagrammatic):
         -------
         tuple[Tensor, Tensor]
             Swapped batch with log det of the permutation, so zero
+        """
+        return self.forward(z)
+
+
+
+class FlipDia(Flow, Diagrammatic):
+    """
+    Flow that  flips the diagram upside down updating also the composition in doing so
+    """
+    def __init__(self):
+        """
+        Constructor
+
+        Creates the a permutation flow that flips a diagram upside down updating also the composition
+        """
+        super().__init__()
+
+
+    def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Override of the torch.nn.Module method
+
+        Equal to normal Flip but also update the diagram composition
+
+        Parameters
+        ----------
+        z
+            Batch with diagrams
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Flipped diagrams and log det of the permutation, so zero
+        """
+        self.flip_dia_comp()
+        return torch.flip(z, dims=(1,)), torch.zeros(z.shape[0], device=z.device)
+
+    def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Perform the inverse, that is equal to the forward transformation in this case   
+
+        Parameters
+        ----------
+        z
+            Batch with the diagrams
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Flipped diagrams and log det of the permutation, so zero
         """
         return self.forward(z)

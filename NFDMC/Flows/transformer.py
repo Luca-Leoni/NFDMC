@@ -9,7 +9,7 @@ class Affine(Transformer):
     """
     Definition of the affine transformer as a basic linear transformation
     """
-    def __init__(self):
+    def __init__(self, scale_h: bool = False):
         """
         Constructor
 
@@ -19,6 +19,11 @@ class Affine(Transformer):
         So that both log det and inverse are analitically known, also the number of parameters needed for variable dimension is 2.
         """
         super().__init__(2)
+
+        if scale_h:
+            self.__scale = lambda h: torch.exp(h)
+        else:
+            self.__scale = lambda h: h
 
     def forward(self, z: Tensor, h: Tensor) -> Tensor:
         """
@@ -36,7 +41,7 @@ class Affine(Transformer):
         Tensor
             Output variable
         """
-        return torch.exp(h[:, ::2]) * z + h[:, 1::2]
+        return torch.exp(h[:, ::2]) * z + self.__scale(h[:, 1::2])
 
     def inverse(self, z: Tensor, h: Tensor) -> Tensor:
         """
@@ -56,7 +61,7 @@ class Affine(Transformer):
         Tensor
             Untransformed variable
         """
-        return (z - h[:, 1::2]) * torch.exp(-h[:, ::2])
+        return (z - self.__scale(h[:, 1::2])) * torch.exp(-h[:, ::2])
 
     def log_det(self, _: Tensor, h: Tensor) -> Tensor:
         r"""
