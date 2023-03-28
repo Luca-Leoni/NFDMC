@@ -33,3 +33,16 @@ def test_TwoMoon_sampling():
     sample = dist.sample(100)
 
     assert sample.shape == (100, 2)
+
+
+@settings(deadline=5000)
+@given(dim=st.integers(min_value = 1, max_value = 10000),
+       num_sample=st.integers(min_value = 1, max_value = 10000))
+def test_Exponential_forward(dim: int, num_sample: int):
+    dis = generals.MultiExponential(dim).to("cuda")
+
+    sample, log_prob = dis(num_sample)
+
+    assert sample.shape == (num_sample, dim)
+    assert log_prob.shape == (num_sample,)
+    assert (log_prob < 0).all()

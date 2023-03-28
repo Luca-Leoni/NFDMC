@@ -6,12 +6,42 @@ from ..Archetypes import Flow, Diagrammatic, block_types
 #------------------------------------------
 
 class DiaChecker(Flow, Diagrammatic):
-    def __init__(self, last: bool = False) -> None:
+    """
+    Transformation for chagning the vector in output from a general transformation back to a Diagram by doing specific transformation for every block type.
+    """
+    def __init__(self, last: bool = False):
+        """
+        Constructor
+
+        Create the transformation layer that depending on its position in the flow can change the transformation that performs. In particular if it's the last operation it brings back the diagram in its original form after has been shuffled in the flow.
+
+        IMPORTANT: this transformation is not invertible, so adding it the flow would not be able to compute the log probability of the model. Not a problem if using the reverse_kdl loss.
+
+        Parameters
+        ----------
+        last
+            Tells if its the last transformation or not.
+        """
         super().__init__()
         
         self.__last = last
 
     def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Override of the torch.nn.Module method
+
+        Apply the wanted transformations to the batch
+
+        Parameters
+        ----------
+        z
+            Batch of vectors
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Batch of diagrams and log det of the transformation, so zero
+        """
         block_type = self.get_block_types()
 
         # If is last layer put the diagram in initial normal composition

@@ -192,6 +192,88 @@ class MultiModalGaussian(Distribution):
         return torch.logsumexp(log_p, dim=1) - 0.9189385332046727 - torch.log(torch.sum(torch.prod(self.std_dev, dim=1)))
 
 
+class MultiExponential(Distribution):
+    def __init__(self, n_dim: int, trainable: bool = False, rateo: Tensor | None = None):
+        r"""
+        Constructor
+
+        Generate a multi exponential distribution where every variable is drawn from a separate distribution given by:
+            .. math::
+                p(z_i) = \lambda_i e^{-\lambda_i z_i}
+        so that every element is given inside $\mathbb{R}_+$ with a different rateo $\lambda_i$
+
+        Parameters
+        ----------
+        n_dim
+            Number of dimensions of the random variable
+        trainable
+            Tells if the $\lambda$ should be counted as paramters to train 
+        rateo
+            Starting values of the $\lambda$ to use for every variable
+        """
+        super().__init__()
+
+        self.__n_dim = n_dim
+
+        if isinstance(rateo, type(None)):
+            rateo = torch.tensor(1.0)
+
+        if trainable:
+            self.rateo = nn.Parameter(rateo)
+        else:
+            self.register_buffer("rateo", rateo)
+
+    def forward(self, num_sample: int = 1) -> tuple[Tensor, Tensor]:
+        """
+        Override of the torch.nn.Module method
+
+        Draws the wanted number of sample and returns them alogn withe their log probaility
+
+        Parameters
+        ----------
+        num_sample
+            Number of samples to draw
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Batch with the samples and log probability of them
+        """
+        z = self.sample(num_sample)
+        return z, self.log_prob(z)
+
+    def sample(self, num_sample: int = 1) -> Tensor:
+        """
+        Draws samples from the distribution
+
+        Parameters
+        ----------
+        num_sample
+            Number of sample to draw
+
+        Returns
+        -------
+        Tensor
+            Batch with the sample
+        """
+        z = torch.rand(num_sample, self.__n_dim, device=self.rateo.device)
+        return -torch.log(z)/torch.prod(self.rateo)
+
+    def log_prob(self, z: Tensor) -> Tensor:
+        """
+        Computes the log probabilities of the batch of sample given
+
+        Parameters
+        ----------
+        z
+            Batch with the samples
+
+        Returns
+        -------
+        Tensor
+            Log probabilities of the samples
+        """
+        return -torch.sum(self.rateo * z, dim=1) + torch.sum(torch.log(self.rateo))
 
 
 class TwoMoon(RSDistribution):
