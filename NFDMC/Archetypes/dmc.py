@@ -30,10 +30,12 @@ class Diagrammatic:
     __block_types   = []
     __block_name    = dict()
 
+    __dia_comp      = torch.tensor([], dtype=torch.long)
+
 
     def __init__(self):
         """
-        COnstructor
+        Constructor
 
         Nothing happens here, the construction of the diagram needs to be done separatelly through static methods. In fact objects of this class should not be constructed or used and modifications should be possible only from Diagrammatic modules.
         """
@@ -59,6 +61,8 @@ class Diagrammatic:
         Diagrammatic.__block_lenghts = torch.cat( (Diagrammatic.__block_lenghts, torch.tensor([int(lenght)], dtype=torch.long)))
         Diagrammatic.__block_types.append(type)
 
+        Diagrammatic().__compute_dia_comp()
+
 
 
     @staticmethod
@@ -69,6 +73,7 @@ class Diagrammatic:
         Diagrammatic.__block_lenghts = torch.tensor([], dtype=torch.long)
         Diagrammatic.__block_types.clear()
         Diagrammatic.__block_name    = dict()
+        Diagrammatic.__dia_comp      = torch.tensor([], dtype=torch.long)
 
     @staticmethod
     def print_comp():
@@ -97,16 +102,7 @@ class Diagrammatic:
         Tensor
             2D array containing informations of begin and end of the different blocks
         """
-        dia_comp = torch.zeros(Diagrammatic.__block_lenghts.shape[0], 2, dtype=torch.long)
-        
-        dia_comp[0,1] = Diagrammatic.__block_lenghts[0]
-        
-        # Loop in order to set all others initial positions
-        for i in range(1, dia_comp.shape[0]):
-            dia_comp[i, 0] = dia_comp[i-1, 1]
-            dia_comp[i, 1] = dia_comp[i, 0] + Diagrammatic.__block_lenghts[i]
-
-        return dia_comp[list(Diagrammatic.__block_name.values()), :]
+        return Diagrammatic.__dia_comp
 
     def get_block_types(self) -> list[block_types]:
         """
@@ -156,6 +152,8 @@ class Diagrammatic:
         Diagrammatic.__block_lenghts[pos1], Diagrammatic.__block_lenghts[pos2] = lenghts[pos2], lenghts[pos1] 
         Diagrammatic.__block_name[block1], Diagrammatic.__block_name[block2] = Diagrammatic.__block_name[block2], Diagrammatic.__block_name[block1]
 
+        self.__compute_dia_comp()
+
 
     def flip_dia_comp(self):
         """
@@ -170,6 +168,8 @@ class Diagrammatic:
             for name, pos in items:
                 if pos == size - value - 1:
                     Diagrammatic.__block_name[name] = value
+
+        self.__compute_dia_comp()
 
 
     def get_block_pos(self, name: str) -> int:
@@ -235,3 +235,48 @@ class Diagrammatic:
 
         for i, name in enumerate(Diagrammatic.__block_name):
             Diagrammatic.__block_name[name] = i
+
+        self.__compute_dia_comp()
+
+
+    def get_block_from(self, block: int | str, z: Tensor, bias_l: int = 0, step: int = 1) -> Tensor:
+        """
+        Utility function in order to retrive a wanted block from a batch of diagrams
+
+        Parameters
+        ----------
+        block
+            Block that you want to retrive, cna be the index of it or the name
+        z
+            Batch of diagrams
+        bias_l
+            bias to add to the left position of the bloc, sometimes is usefull
+        step
+            Step to take into the slicing of the array z[:, a:b:step]
+
+        Returns
+        -------
+        Tensor
+            Slice of the array that contains teh wanted block
+        """
+        if isinstance(block, str):
+            block = self.get_block(block)
+
+        return z[:, Diagrammatic.__dia_comp[block,0]+bias_l:Diagrammatic.__dia_comp[block,1]:step]
+
+
+
+    def __compute_dia_comp(self):
+        """
+        Evaluates the diagram composition and stores it inside the static variable inside the class, needs to be called every time the composition gets modified.
+        """
+        Diagrammatic.__dia_comp = torch.zeros(Diagrammatic.__block_lenghts.shape[0], 2, dtype=torch.long)
+        
+        Diagrammatic.__dia_comp[0,1] = Diagrammatic.__block_lenghts[0]
+        
+        # Loop in order to set all others initial positions
+        for i in range(1, Diagrammatic.__dia_comp.shape[0]):
+            Diagrammatic.__dia_comp[i, 0] = Diagrammatic.__dia_comp[i-1, 1]
+            Diagrammatic.__dia_comp[i, 1] = Diagrammatic.__dia_comp[i, 0] + Diagrammatic.__block_lenghts[i]
+
+        Diagrammatic.__dia_comp = Diagrammatic.__dia_comp[list(Diagrammatic.__block_name.values()), :]

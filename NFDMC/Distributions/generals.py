@@ -257,7 +257,7 @@ class MultiExponential(Distribution):
             Batch with the sample
         """
         z = torch.rand(num_sample, self.__n_dim, device=self.rateo.device)
-        return -torch.log(z)/torch.prod(self.rateo)
+        return -torch.log(z)/self.rateo
 
     def log_prob(self, z: Tensor) -> Tensor:
         """

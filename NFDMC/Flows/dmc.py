@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 
 from torch import Tensor
 from ..Archetypes import Flow, Diagrammatic, block_types
@@ -69,7 +70,7 @@ class OrderTime(Flow, Diagrammatic):
     """
     Flow that can be inserted inside the flow in order to ensure that the time ordered blocks remains effectivelly ordered. In particular assumes that the flow was made so that the times inside the diagram are positive and so that we can simply order them by summing to the destruction time the creation one.
     """
-    def __init__(self):
+    def __init__(self, trainable: bool = False):
         """
         Constructor
 
@@ -94,6 +95,11 @@ class OrderTime(Flow, Diagrammatic):
         if len(self.__blocks) == 0:
             raise RuntimeWarning("No time ordered blocks are present there is no point in inserting a OrderTime inside the flow!")
 
+        if trainable:
+            self.delta = nn.Parameter(torch.ones(len(self.__blocks), 1) * 10)
+        else:
+            self.register_buffer("delta", torch.ones(len(self.__blocks), 1) * 10)
+
     def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
         """
         Override of the torch.nn.Module method
@@ -110,12 +116,30 @@ class OrderTime(Flow, Diagrammatic):
         tuple[Tensor, Tensor]
             Orderd diagrams with log det of the transformation, so zero
         """
-        dia_comp = self.get_dia_comp()
+        tm_fly  = self.get_block_from("tm_fly", z)
+        log_det = torch.zeros(z.shape[0], device=z.device)
+        x       = torch.clone(z)
 
-        for i in self.__blocks:
-            z[:, dia_comp[i,0]+1:dia_comp[i,1]:2] += z[:, dia_comp[i,0]:dia_comp[i,1]:2]
+        for j, i in enumerate(self.__blocks):
+            beg = self.get_dia_comp()[i,0]
+            end = self.get_dia_comp()[i,1]
 
-        return z, torch.zeros(z.shape[0], device=z.device)
+            scaled_tm_c = z[:, beg:end:2] / self.delta[j]
+            scaled_tm_d = z[:, beg+1:end:2] / self.delta[j]
+
+            x[:, beg:end:2] = tm_fly/(1 + torch.exp(-z[:, beg:end:2] / self.delta[j]
+))
+            x[:, beg+1:end:2] = (tm_fly - x[:, beg:end:2])/(1 + torch.exp(-z[:, beg+1:end:2] / self.delta[j])) + x[:, beg:end:2]
+
+            # Setup consistend log det computation
+            log_det += torch.sum(torch.log(tm_fly/self.delta[j]) - torch.logsumexp(self.__logsumexp_setup(scaled_tm_c), dim=2), dim=1)
+            log_det += torch.sum(torch.log((tm_fly - x[:, beg:end:2])/self.delta[j]) - torch.logsumexp(self.__logsumexp_setup(scaled_tm_d), dim=2), dim=1)
+
+        bad = torch.isinf(log_det)
+        if bad.any():
+            print(f"The bad diagrams that makes things crush are:\n {x[bad, :]}")
+
+        return x, log_det
 
     def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]:
         """
@@ -131,9 +155,30 @@ class OrderTime(Flow, Diagrammatic):
         tuple[Tensor, Tensor]
             Unordered diagrams and log det of the transformation, so zero
         """
-        dia_comp = self.get_dia_comp()
+        tm_fly  = self.get_block_from("tm_fly", z)
+        log_det = torch.zeros(z.shape[0], device=z.device)
 
-        for i in self.__blocks:
-            z[:, dia_comp[i,0]+1:dia_comp[i,1]:2] -= z[:, dia_comp[i,0]:dia_comp[i,1]:2]
+        for j, i in enumerate(self.__blocks):
+            beg = self.get_dia_comp()[i,0]
+            end = self.get_dia_comp()[i,1]
 
-        return z, torch.zeros(z.shape[0], device=z.device)
+            tm_c = self.get_block_from(i, z, step=2).clone()
+            tm_d = self.get_block_from(i, z, bias_l=1, step=2).clone()
+
+            z[:, beg:end:2] = -self.delta[j] * torch.log(tm_fly/tm_c - 1)
+            z[:, beg+1:end:2] = -self.delta[j] * torch.log((tm_fly - tm_c)/(tm_d - tm_c) - 1)
+
+            # Setup consistend log det computation
+            log_det += torch.sum(torch.log(tm_fly/self.delta[j]) - torch.logsumexp(self.__logsumexp_setup(z[:, beg:end:2]/self.delta[j]), dim=2), dim=1)
+            log_det += torch.sum((tm_fly - z[:, beg:end:2])/self.delta[j] - torch.logsumexp(self.__logsumexp_setup(z[:, beg+1:end:2]/self.delta[j]), dim=2), dim=1)
+
+
+        return z, -log_det
+
+
+    def __logsumexp_setup(self, z: Tensor) -> Tensor:
+        z = z.reshape(z.shape[0], z.shape[1], 1).repeat(1,1,3)
+        z[:,:,1] = 0.6931471805599453
+        z[:,:,2] *= -1
+
+        return z

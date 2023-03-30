@@ -72,7 +72,7 @@ def test_Affine_Coupling(var_dim, num_sample):
     
     assert z2.shape == (num_sample, var_dim)
     assert log_det.shape == (num_sample,)
-    assert torch.isclose(z2, z, rtol=0.00005).all()
+    assert torch.isclose(z2, z, rtol=0., atol=0.00001).all()
 
 #--------------------------------
 
