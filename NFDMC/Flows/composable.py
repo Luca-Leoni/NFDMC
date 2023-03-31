@@ -153,4 +153,5 @@ class Coupling(Flow):
         """
         z1, z2 = self.__split(z)
         h = self.__cond(z1)
-        return torch.cat((z1, self.__trans.inverse(z2, h)), dim = 1), -self.__trans.log_det(z2, h)
+        z2 = self.__trans.inverse(z2,h)
+        return torch.cat((z1, z2), dim = 1), -self.__trans.log_det(z2, h)

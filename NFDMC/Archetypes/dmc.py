@@ -115,7 +115,7 @@ class Diagrammatic:
         """
         return Diagrammatic.__block_types
 
-    def get_block_type(self, block: str) -> block_types:
+    def get_block_type(self, block: str | int) -> block_types:
         """
         Gets the type of a wanted block
 
@@ -129,7 +129,7 @@ class Diagrammatic:
         block_types
             Type of the block
         """
-        return Diagrammatic.__block_types[self.get_block(block)]
+        return Diagrammatic.__block_types[self.get_block(block) if isinstance(block, str) else block]
 
 
     def swap_blocks(self, block1: str, block2: str):
@@ -145,14 +145,15 @@ class Diagrammatic:
         block2
             name of the second block
         """
-        pos1 = Diagrammatic.__block_name[block1]
-        pos2 = Diagrammatic.__block_name[block2]
-        lenghts = torch.clone(Diagrammatic.__block_lenghts)
+        if block1 != block2:
+            pos1 = Diagrammatic.__block_name[block1]
+            pos2 = Diagrammatic.__block_name[block2]
+            lenghts = torch.clone(Diagrammatic.__block_lenghts)
 
-        Diagrammatic.__block_lenghts[pos1], Diagrammatic.__block_lenghts[pos2] = lenghts[pos2], lenghts[pos1] 
-        Diagrammatic.__block_name[block1], Diagrammatic.__block_name[block2] = Diagrammatic.__block_name[block2], Diagrammatic.__block_name[block1]
+            Diagrammatic.__block_lenghts[pos1], Diagrammatic.__block_lenghts[pos2] = lenghts[pos2], lenghts[pos1] 
+            Diagrammatic.__block_name[block1], Diagrammatic.__block_name[block2] = Diagrammatic.__block_name[block2], Diagrammatic.__block_name[block1]
 
-        self.__compute_dia_comp()
+            self.__compute_dia_comp()
 
 
     def flip_dia_comp(self):
@@ -264,6 +265,28 @@ class Diagrammatic:
 
         return z[:, Diagrammatic.__dia_comp[block,0]+bias_l:Diagrammatic.__dia_comp[block,1]:step]
 
+    def get_block_name(self, block: int) -> str:
+        """
+        Returns the name of the selected block inside the configuration.
+
+        Parameters
+        ----------
+        block
+            Index of the block in the configuration
+        """
+        return list(Diagrammatic.__block_name.keys())[block]
+
+    
+    def get_blocks_lenght(self) -> Tensor:
+        """
+        Returns the lenghts vector
+
+        Returns
+        -------
+        Tensor
+            Lenghts vector
+        """
+        return Diagrammatic.__block_lenghts
 
 
     def __compute_dia_comp(self):

@@ -190,7 +190,7 @@ class SwapDiaBlock(Flow, Diagrammatic):
     """
     Diagrammatic Flow that swaps the position of two blocks inside the diagram composition.
     """
-    def __init__(self, block1_name: str, block2_name: str):
+    def __init__(self, block1: int | str, block2: int | str):
         """
         Constructor
 
@@ -198,16 +198,26 @@ class SwapDiaBlock(Flow, Diagrammatic):
 
         Parameters
         ----------
-        block1_name
-            Name of the first block
-        block2_name
-            Name of the second block
+        block1
+            Name or index of the first block
+        block2
+            Name or index of the second block
         """
         super().__init__()
 
+        b1_str = isinstance(block1, str)
+        b2_str = isinstance(block2, str)
+
+        block1_name = block1 if b1_str else self.get_block_name(block1)
+        block2_name = block2 if b2_str else self.get_block_name(block2)
+
+        if b1_str:
+            block1 = self.get_block(block1)
+        if b2_str:
+            block2 = self.get_block(block2)
+
         self.__bn = [block1_name, block2_name]
-        self.__b = torch.tensor([self.get_block(block1_name), 
-                                 self.get_block(block2_name)])
+        self.__b = torch.tensor([block1, block2])
 
 
     def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:

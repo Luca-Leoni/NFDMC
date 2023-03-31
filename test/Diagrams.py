@@ -4,7 +4,8 @@ import numpy as np
 from NFDMC.Archetypes import Diagrammatic, block_types
 from NFDMC.Distributions import diagrams
 from NFDMC.Flows.permutation import SwapDiaBlock, PermuteTimeBlock
-from NFDMC.Flows.dmc import DiaChecker, OrderTime
+from NFDMC.Flows.dmc import BCoupling, TOBCoupling
+from NFDMC.Flows import transformer
 from hypothesis import given, settings, strategies as st
 
 #---------------------------------------------
@@ -206,61 +207,6 @@ def test_time_swap_permute(batch, block1, block2):
 
 
 @given(batch=st.integers(min_value=1, max_value=100),
-       block1=st.integers(min_value=0, max_value=3),
-       block2=st.integers(min_value=0, max_value=3))
-def test_dia_checker(batch, block1, block2):
-    Diagrammatic.clear()
-
-    lenghts = torch.randint(low=1, high=10, size=(4,), dtype=torch.long).data.numpy() * 2
-    types   = [block_types.integer, block_types.floating, block_types.tm_ordered, block_types.floating]
-
-    for i in range(4):
-        Diagrammatic.add_block(f"block{i}", int(lenghts[i]), types[i])
-
-    z = torch.rand(size=(batch, int(np.sum(lenghts)))) * 3
-
-    dia_check = DiaChecker()
-
-    diagrams, _ = SwapDiaBlock(f"block{block1}", f"block{block2}")(z)
-    diagrams, _ = dia_check(z)
-
-    dia_comp = Diagrammatic().get_dia_comp()
-    # assert (diagrams[:, dia_comp[0,0]:dia_comp[0,1]] == torch.floor(diagrams[:, dia_comp[0,0]:dia_comp[0,1]])).all()
-    assert (diagrams[:, dia_comp[0,0]:dia_comp[0,1]] == z[:, dia_comp[0,0]:dia_comp[0,1]]).all()
-    assert (diagrams[:, dia_comp[1,0]:dia_comp[1,1]] == z[:, dia_comp[1,0]:dia_comp[1,1]]).all()
-    assert (diagrams[:, dia_comp[2,0]:dia_comp[2,1]:2] < diagrams[:, dia_comp[2,0]+1:dia_comp[2,1]:2]).all()
-
-
-@given(batch=st.integers(min_value=1, max_value=100),
-       block1=st.integers(min_value=0, max_value=3),
-       block2=st.integers(min_value=0, max_value=3))
-def test_dia_checker_last(batch, block1, block2):
-    Diagrammatic.clear()
-
-    lenghts = torch.randint(low=1, high=10, size=(4,), dtype=torch.long).data.numpy() * 2
-    types   = [block_types.integer, block_types.floating, block_types.tm_ordered, block_types.floating]
-
-    for i in range(4):
-        Diagrammatic.add_block(f"block{i}", int(lenghts[i]), types[i])
-    init_comp = Diagrammatic().get_dia_comp()
-
-    z = torch.rand(size=(batch, int(np.sum(lenghts)))) * 3
-
-
-    dia_check = DiaChecker(last=True)
-
-    diagrams, _ = SwapDiaBlock(f"block{block1}", f"block{block2}")(z)
-    diagrams, _ = dia_check(diagrams)
-
-
-    dia_comp = Diagrammatic().get_dia_comp()
-    assert (init_comp == dia_comp).all()
-    assert (diagrams[:, dia_comp[0,0]:dia_comp[0,1]] == torch.floor(diagrams[:, dia_comp[0,0]:dia_comp[0,1]])).all()
-    assert (diagrams[:, dia_comp[1,0]:dia_comp[1,1]] == z[:, dia_comp[1,0]:dia_comp[1,1]]).all()
-    assert (diagrams[:, dia_comp[2,0]:dia_comp[2,1]:2] < diagrams[:, dia_comp[2,0]+1:dia_comp[2,1]:2]).all()
-
-
-@given(batch=st.integers(min_value=1, max_value=100),
        n_blocks=st.integers(min_value=2, max_value=6))
 def test_dia_flip(batch, n_blocks):
     Diagrammatic.clear()
@@ -282,33 +228,64 @@ def test_dia_flip(batch, n_blocks):
     assert (beg_part == end_part).all()
 
 
-@given(batch=st.integers(min_value=1, max_value=10))
-def test_order_time(batch):
+@settings(deadline=5000)
+@given(batch=st.integers(min_value=1, max_value=100),
+       block=st.integers(min_value=0, max_value=4))
+def test_PAffine_BCoupling(batch, block: int):
+    Diagrammatic.clear()
+
+    lenghts = torch.randint(low=1, high=10, size=(5,)).data.numpy()
+    bias = lenghts[block] // 2 + lenghts[block] % 2
+    beg = np.sum(lenghts[:block]) + bias
+    end = beg + lenghts[block] - bias
+
+    for i in range(5):
+        Diagrammatic.add_block(f"block{i}", lenghts[i], block_types.floating)
+    diagrams = torch.rand(batch, np.sum(lenghts)).to("cuda")
+
+    flow = BCoupling(block, transformer.PAffine()).to("cuda")
+
+    transformed, log_det = flow(diagrams)
+    inversed, log_det_in = flow.inverse(transformed)
+
+    assert torch.isclose(log_det, -log_det_in, rtol=0, atol=1e-5).all()
+    assert torch.isclose(diagrams, inversed, rtol=0, atol=1e-5).all()
+    assert (diagrams[:, beg:end] != transformed[:, beg:end]).all()
+    if block != 4:
+        assert (diagrams[:, np.sum(lenghts[:-1]):] == transformed[:, np.sum(lenghts[:-1]):]).all()
+
+
+@settings(deadline=5000)
+@given(batch=st.integers(min_value=1, max_value=100),
+       block=st.integers(min_value=0, max_value=4))
+def test_CPAffine_TOBCoupling(batch, block: int):
     Diagrammatic.clear()
 
     Diagrammatic.add_block("tm_fly", 1, block_types.floating)
-    Diagrammatic.add_block("time1", 10, block_types.tm_ordered)
-    Diagrammatic.add_block("pokemon", 2, block_types.integer)
-    Diagrammatic.add_block("time2", 10, block_types.tm_ordered)
 
-    start = torch.rand(batch, 23)
-    start[:,0] += 2
+    lenghts = torch.randint(low=1, high=5, size=(5,)).data.numpy()*2
+    n_couples = lenghts[block] // 2
+    bias = 2*(n_couples // 2 + n_couples % 2)
+    beg = np.sum(lenghts[:block]) + bias + 1
+    end = beg + lenghts[block] - bias
 
-    diagrams, log_det = OrderTime()(torch.clone(start))
-    inverted, log_det = OrderTime().inverse(torch.clone(diagrams))
+    for i in range(5):
+        Diagrammatic.add_block(f"block{i}", lenghts[i], block_types.tm_ordered)
+    diagrams = torch.rand(batch, np.sum(lenghts)+1).to("cuda")
 
-    tm_1 = Diagrammatic().get_block_from("time1", diagrams)
-    tm_2 = Diagrammatic().get_block_from("time2", diagrams)
+    # Set tm_fly greater than all other otherwise CPAffine does not work
+    diagrams[:, 0] += 1
 
-    assert log_det.shape == (batch,)
-    assert diagrams.shape == (batch, 23)
-    assert (tm_1 < diagrams[:,0:1]).all()
-    assert (tm_2 < diagrams[:,0:1]).all()
-    assert (tm_1 >= 0).all()
-    assert (tm_2 >= 0).all()
-    assert (tm_2[:,::2] <= tm_2[:,1::2]).all()
-    assert (tm_1[:,::2] <= tm_1[:,1::2]).all()
-    assert torch.isclose(inverted, start, rtol=0., atol=0.00001).all()
+    flow = TOBCoupling(block+1, transformer.CPAffine()).to("cuda")
+
+    transformed, log_det = flow(diagrams)
+    inversed, log_det_in = flow.inverse(transformed) 
+
+    assert torch.isclose(log_det, -log_det_in, rtol=0, atol=1e-5).all()
+    assert torch.isclose(diagrams, inversed, rtol=0, atol=1e-5).all()
+    assert (diagrams[:, beg:end] != transformed[:, beg:end]).all()
+    if block != 4:
+        assert (diagrams[:, np.sum(lenghts[:-1])+1:] == transformed[:, np.sum(lenghts[:-1])+1:]).all()
 
 #--------------------------------------
 

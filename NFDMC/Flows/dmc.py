@@ -2,183 +2,137 @@ import torch
 import torch.nn as nn
 
 from torch import Tensor
-from ..Archetypes import Flow, Diagrammatic, block_types
+from ..Archetypes import Flow, Diagrammatic, block_types, Transformer
+from ..Modules.nets import RealMVP
+from .permutation import SwapDiaBlock
 
 #------------------------------------------
 
-class DiaChecker(Flow, Diagrammatic):
-    """
-    Transformation for chagning the vector in output from a general transformation back to a Diagram by doing specific transformation for every block type.
-    """
-    def __init__(self, last: bool = False):
-        """
-        Constructor
-
-        Create the transformation layer that depending on its position in the flow can change the transformation that performs. In particular if it's the last operation it brings back the diagram in its original form after has been shuffled in the flow.
-
-        IMPORTANT: this transformation is not invertible, so adding it the flow would not be able to compute the log probability of the model. Not a problem if using the reverse_kdl loss.
-
-        Parameters
-        ----------
-        last
-            Tells if its the last transformation or not.
-        """
-        super().__init__()
-        
-        self.__last = last
-
-    def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
-        """
-        Override of the torch.nn.Module method
-
-        Apply the wanted transformations to the batch
-
-        Parameters
-        ----------
-        z
-            Batch of vectors
-
-        Returns
-        -------
-        tuple[Tensor, Tensor]
-            Batch of diagrams and log det of the transformation, so zero
-        """
-        block_type = self.get_block_types()
-
-        # If is last layer put the diagram in initial normal composition
-        if self.__last:
-            dia_comp   = self.get_dia_comp()
-
-            x = torch.clone(z)
-            z = x[:, dia_comp[0,0]:dia_comp[0,1]]
-            for i in range(1, dia_comp.shape[0]):
-                z = torch.cat( (z, x[:, dia_comp[i,0]:dia_comp[i,1]]), dim=1 )
-                
-            self.set_initial_comp()
-
-        # perform wanted transformation to have a normal diagram
-        for i, block in enumerate(self.get_dia_comp()):
-            if block_type[i] == block_types.integer and self.__last:
-                z[:, block[0]:block[1]] = torch.floor(z[:, block[0]:block[1]])
-            elif block_type[i] == block_types.tm_ordered:
-                z[:, block[0]+1:block[1]:2] += z[:, block[0]:block[1]:2]
-
-        return torch.abs(z), torch.zeros(z.shape[0], device=z.device)
-
-
-class OrderTime(Flow, Diagrammatic):
-    """
-    Flow that can be inserted inside the flow in order to ensure that the time ordered blocks remains effectivelly ordered. In particular assumes that the flow was made so that the times inside the diagram are positive and so that we can simply order them by summing to the destruction time the creation one.
-    """
-    def __init__(self, trainable: bool = False):
-        """
-        Constructor
-
-        Creates a diagrammatic flow that allows for the time ordered block to remain ordered inside the structure by doing the following operation
-            .. math::
-                z_i^d' = z_i^d + z_i^c
-        So that also the log determinant of the transformation is simply zero.
-
-        Raises
-        ------
-        RuntimeWarning:
-            If no time ordered blocks are present then there is no point in using this flow.
-        """
+class BCoupling(Flow, Diagrammatic):
+    def __init__(self, block: int | str, trans: Transformer, hidden_size: int = 100):
         super().__init__()
 
-        # Gather all the time ordered blocks
-        self.__blocks = []
-        for i, type in enumerate(self.get_block_types()):
-            if type == block_types.tm_ordered:
-                self.__blocks.append(i)
+        # Take the right index
+        if isinstance(block, str):
+            block = self.get_block(block)
 
-        if len(self.__blocks) == 0:
-            raise RuntimeWarning("No time ordered blocks are present there is no point in inserting a OrderTime inside the flow!")
+        # Define the split list based on the diagram sizes
+        dia_size = int(torch.sum(self.get_blocks_lenght()))
+        blo_size = int(self.get_blocks_lenght()[block])
+        even     = blo_size % 2
 
-        if trainable:
-            self.delta = nn.Parameter(torch.ones(len(self.__blocks), 1) * 10)
-        else:
-            self.register_buffer("delta", torch.ones(len(self.__blocks), 1) * 10)
+        self.__split = [dia_size - (blo_size // 2) - even, blo_size // 2 + even]
+
+        # Defines the transformation to swap the block in the right place
+        self.__swap = SwapDiaBlock(block, -1) 
+
+        # Define the conditioner based on the split
+        self.__cond = RealMVP(self.__split[0], hidden_size, hidden_size, self.__split[1] * trans.trans_features)
+
+        # Save transformer
+        self.__trans = trans
+
 
     def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
-        """
-        Override of the torch.nn.Module method
+        z, _ = self.__swap(z)
+        z1, z2 = torch.split(z, self.__split, dim=1)
+        h = self.__cond(z1)
+        z, _ = self.__swap(torch.cat((z1, self.__trans(z2, h)), dim=1))
+        return  z, self.__trans.log_det(z2, h)
 
-        Order the creationa nd annhilation time inside the diagram by simply adding one to the other.
-
-        Parameters
-        ----------
-        z
-            Batch with the diagrams
-
-        Returns
-        -------
-        tuple[Tensor, Tensor]
-            Orderd diagrams with log det of the transformation, so zero
-        """
-        tm_fly  = self.get_block_from("tm_fly", z)
-        log_det = torch.zeros(z.shape[0], device=z.device)
-        x       = torch.clone(z)
-
-        for j, i in enumerate(self.__blocks):
-            beg = self.get_dia_comp()[i,0]
-            end = self.get_dia_comp()[i,1]
-
-            scaled_tm_c = z[:, beg:end:2] / self.delta[j]
-            scaled_tm_d = z[:, beg+1:end:2] / self.delta[j]
-
-            x[:, beg:end:2] = tm_fly/(1 + torch.exp(-z[:, beg:end:2] / self.delta[j]
-))
-            x[:, beg+1:end:2] = (tm_fly - x[:, beg:end:2])/(1 + torch.exp(-z[:, beg+1:end:2] / self.delta[j])) + x[:, beg:end:2]
-
-            # Setup consistend log det computation
-            log_det += torch.sum(torch.log(tm_fly/self.delta[j]) - torch.logsumexp(self.__logsumexp_setup(scaled_tm_c), dim=2), dim=1)
-            log_det += torch.sum(torch.log((tm_fly - x[:, beg:end:2])/self.delta[j]) - torch.logsumexp(self.__logsumexp_setup(scaled_tm_d), dim=2), dim=1)
-
-        bad = torch.isinf(log_det)
-        if bad.any():
-            print(f"The bad diagrams that makes things crush are:\n {x[bad, :]}")
-
-        return x, log_det
 
     def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]:
-        """
-        Inerse of the transformation, so that basically instead of summing the creation times we subtract them to the destruction ones.
-
-        Parameters
-        ----------
-        z
-            Batch of diagrams
-
-        Returns
-        -------
-        tuple[Tensor, Tensor]
-            Unordered diagrams and log det of the transformation, so zero
-        """
-        tm_fly  = self.get_block_from("tm_fly", z)
-        log_det = torch.zeros(z.shape[0], device=z.device)
-
-        for j, i in enumerate(self.__blocks):
-            beg = self.get_dia_comp()[i,0]
-            end = self.get_dia_comp()[i,1]
-
-            tm_c = self.get_block_from(i, z, step=2).clone()
-            tm_d = self.get_block_from(i, z, bias_l=1, step=2).clone()
-
-            z[:, beg:end:2] = -self.delta[j] * torch.log(tm_fly/tm_c - 1)
-            z[:, beg+1:end:2] = -self.delta[j] * torch.log((tm_fly - tm_c)/(tm_d - tm_c) - 1)
-
-            # Setup consistend log det computation
-            log_det += torch.sum(torch.log(tm_fly/self.delta[j]) - torch.logsumexp(self.__logsumexp_setup(z[:, beg:end:2]/self.delta[j]), dim=2), dim=1)
-            log_det += torch.sum((tm_fly - z[:, beg:end:2])/self.delta[j] - torch.logsumexp(self.__logsumexp_setup(z[:, beg+1:end:2]/self.delta[j]), dim=2), dim=1)
+        z, _ = self.__swap(z)
+        z1, z2 = torch.split(z, self.__split, dim=1)
+        h = self.__cond(z1)
+        z2 = self.__trans.inverse(z2,h)
+        z, _ = self.__swap(torch.cat((z1, z2), dim=1))
+        return  z, -self.__trans.log_det(z2, h)
 
 
-        return z, -log_det
+
+class TOBCoupling(Flow, Diagrammatic):
+    def __init__(self, block: int | str, trans: Transformer, hidden_size: int = 100):
+        super().__init__()
+
+        # Control the block passed
+        if self.get_block_type(block) != block_types.tm_ordered:
+            raise KeyError("Non time ordered block inserted inside time orfered coupling!")
+
+        # Take the right index
+        if isinstance(block, str):
+            block = self.get_block(block)
+
+        # Define the split list based on the diagram sizes
+        dia_size = int(torch.sum(self.get_blocks_lenght()))
+        n_couple = int(self.get_blocks_lenght()[block]) // 2
+        even     = n_couple % 2
+
+        self.__split = [dia_size - 2*(n_couple // 2 + even), 2*(n_couple // 2 + even)]
+
+        # Defines the transformation to swap the block in the right place
+        self.__swap = SwapDiaBlock(block, -1) 
+
+        # Define the conditioner based on the split
+        self.__cond = RealMVP(self.__split[0], hidden_size, hidden_size, self.__split[1] * (trans.trans_features-1))
+
+        # Save transformer
+        self.__trans = trans
+
+        # Retrive the time of flight
+        self.__t = self.get_block("tm_fly")
 
 
-    def __logsumexp_setup(self, z: Tensor) -> Tensor:
-        z = z.reshape(z.shape[0], z.shape[1], 1).repeat(1,1,3)
-        z[:,:,1] = 0.6931471805599453
-        z[:,:,2] *= -1
+    def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
+        # Swap the eanted block at the end and split the diagram
+        z, _ = self.__swap(z)
+        z1, z2 = torch.split(z, self.__split, dim=1)
 
-        return z
+        # Compute h and add constrain equal to tm_fly
+        h = self.__cond(z1).reshape(z2.shape[0], z2.shape[1], self.__trans.trans_features-1)
+        h = torch.cat((h, self.get_block_from(self.__t, z).unsqueeze(1).expand(h.shape[0], h.shape[1], 1)), dim=2)
+
+        # Evaluate the new creation times
+        tc  = self.__trans(z2[:, ::2], h[:,::2, :].flatten(1))
+
+        # Update constrain on destruction to tm_fly - new tm_creation
+        h[:, 1::2, self.__trans.trans_features-1] -= tc
+
+        # Evaluate the new destruction times
+        td = self.__trans(z2[:, 1::2], h[:, 1::2, :].flatten(1)) + tc
+
+        # Reconstruct couples
+        z2 = torch.cat( (tc.reshape(tc.shape[0], tc.shape[1], 1), td.reshape(tc.shape[0], td.shape[1], 1)), dim=2 ).flatten(1)
+
+        # Recreate the diagrams batch
+        z, _ = self.__swap(torch.cat((z1, z2), dim=1))
+
+        return z, self.__trans.log_det(z2, h.flatten(1))
+
+
+    def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]:
+        # Swap the eanted block at the end and split the diagram
+        z, _ = self.__swap(z)
+        z1, z2 = torch.split(z, self.__split, dim=1)
+
+        # Compute h and add constrain equal to tm_fly
+        h = self.__cond(z1).reshape(z2.shape[0], z2.shape[1], self.__trans.trans_features-1)
+        h = torch.cat((h, self.get_block_from(self.__t, z).unsqueeze(1).expand(h.shape[0], h.shape[1], 1)), dim=2)
+
+        # Set the constrains for destruction to tm_fly - tm_creation
+        h[:, 1::2, self.__trans.trans_features-1] -= z2[:, ::2]
+
+        # First subtract the creation to destruction
+        tc = z2[:, ::2]
+        td = z2[:, 1::2] - tc
+
+        # Reconstruct couples
+        z2 = torch.cat( (tc.reshape(tc.shape[0], tc.shape[1], 1), td.reshape(tc.shape[0], td.shape[1], 1)), dim=2 ).flatten(1)
+
+        # Invert
+        z2 = self.__trans.inverse(z2, h.flatten(1))
+
+        # Recreate the diagrams batch
+        z, _ = self.__swap(torch.cat((z1, z2), dim=1))
+
+        return z, -self.__trans.log_det(z2, h.flatten(1))
