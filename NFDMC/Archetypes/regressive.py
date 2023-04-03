@@ -111,7 +111,7 @@ class Transformer(nn.Module):
 
         self.trans_features = trans_features
 
-    def forward(self, z: Tensor, h: Tensor) -> Tensor: # pyright: ignore
+    def forward(self, z: Tensor, *h: Tensor) -> Tensor: # pyright: ignore
         """
         Override of the torch.nn.Module method
 
@@ -136,7 +136,7 @@ class Transformer(nn.Module):
         """
         raise NotImplementedError()
 
-    def inverse(self, z: Tensor, h: Tensor) -> Tensor: # pyright: ignore
+    def inverse(self, z: Tensor, *h: Tensor) -> Tensor: # pyright: ignore
         r"""
         Definition of the inverse $\tau^{-1}$
 
@@ -161,7 +161,7 @@ class Transformer(nn.Module):
         """
         raise NotImplementedError()
 
-    def log_det(self, z: Tensor, h: Tensor) -> Tensor: # pyright: ignore
+    def log_det(self, z: Tensor, *h: Tensor) -> Tensor: # pyright: ignore
         """
         Computes the log determinante of the forward transformation
 

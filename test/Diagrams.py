@@ -1,12 +1,15 @@
+from os import lchown
 import torch
 import numpy as np
 
 from NFDMC.Archetypes import Diagrammatic, block_types
 from NFDMC.Distributions import diagrams
-from NFDMC.Flows.permutation import SwapDiaBlock, PermuteTimeBlock
+from NFDMC.Flows.permutation import DBsFlip, SwapDiaBlock, PermuteTimeBlock, DBFlip
 from NFDMC.Flows.dmc import BCoupling, TOBCoupling
 from NFDMC.Flows import transformer
 from hypothesis import given, settings, strategies as st
+
+# torch.autograd.set_detect_anomaly(True)
 
 #---------------------------------------------
 
@@ -17,6 +20,19 @@ def check_if_a_in_b(a, b) -> bool:
             present = True
 
     return present
+
+
+def create_random_diagram(n_block: int, btype: block_types) -> np.ndarray:
+    Diagrammatic.clear()
+
+    lenghts = np.random.randint(low=1, high=10, size=(n_block,))
+    if btype == block_types.tm_ordered:
+        lenghts *= 2
+
+    for i, lenght in enumerate(lenghts):
+        Diagrammatic.add_block(f"block{i}", lenght, btype)
+
+    return lenghts
 
 #---------------------------------------------
 
@@ -248,6 +264,9 @@ def test_PAffine_BCoupling(batch, block: int):
     transformed, log_det = flow(diagrams)
     inversed, log_det_in = flow.inverse(transformed)
 
+    # Present only to see if the backward is possible
+    torch.sum(log_det).backward()
+
     assert torch.isclose(log_det, -log_det_in, rtol=0, atol=1e-5).all()
     assert torch.isclose(diagrams, inversed, rtol=0, atol=1e-5).all()
     assert (diagrams[:, beg:end] != transformed[:, beg:end]).all()
@@ -281,11 +300,53 @@ def test_CPAffine_TOBCoupling(batch, block: int):
     transformed, log_det = flow(diagrams)
     inversed, log_det_in = flow.inverse(transformed) 
 
+    # Present only to see if the backward is possible
+    torch.sum(log_det).backward()
+
     assert torch.isclose(log_det, -log_det_in, rtol=0, atol=1e-5).all()
     assert torch.isclose(diagrams, inversed, rtol=0, atol=1e-5).all()
     assert (diagrams[:, beg:end] != transformed[:, beg:end]).all()
     if block != 4:
         assert (diagrams[:, np.sum(lenghts[:-1])+1:] == transformed[:, np.sum(lenghts[:-1])+1:]).all()
+
+@settings(deadline=5000)
+@given(batch=st.integers(min_value=1, max_value=100),
+       n_block=st.integers(min_value=1, max_value=5))
+def test_DBFlip(batch, n_block):
+    lenghts  = create_random_diagram(n_block, block_types.floating) 
+    diagrams = torch.rand(size=(batch, np.sum(lenghts)))
+
+    block    = int(np.random.randint(low=0, high=n_block, size=(1,))) 
+    permute  = DBFlip(block)
+
+    permuted, _ = permute(diagrams)
+
+    beg = np.sum(lenghts[:block])
+    end = beg + lenghts[block]
+    assert (diagrams[:, :beg] == permuted[:, :beg]).all()
+    assert (diagrams[:, end:] == permuted[:, end:]).all()
+    assert (permuted[:, beg:end] == torch.flip(diagrams[:, beg:end], dims=(1,))).all()
+
+
+@settings(deadline=5000)
+@given(batch=st.integers(min_value=1, max_value=100),
+       n_block=st.integers(min_value=1, max_value=5))
+def test_DBFlip_tm_ordered(batch, n_block):
+    lenghts  = create_random_diagram(n_block, block_types.tm_ordered) 
+    diagrams = torch.rand(size=(batch, np.sum(lenghts)))
+
+    block    = int(np.random.randint(low=0, high=n_block, size=(1,))) 
+    permute  = DBFlip(block)
+
+    permuted, _ = permute(diagrams)
+
+    beg = np.sum(lenghts[:block])
+    end = beg + lenghts[block]
+    assert (diagrams[:, :beg] == permuted[:, :beg]).all()
+    assert (diagrams[:, end:] == permuted[:, end:]).all()
+    assert (permuted[:, beg:end] == torch.flip(diagrams[:, beg:end].reshape(batch, lenghts[block] // 2, 2), dims=(1,)).flatten(1)).all()
+
+
 
 #--------------------------------------
 

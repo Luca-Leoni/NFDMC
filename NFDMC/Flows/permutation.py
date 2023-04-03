@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 
 from torch import Tensor
 
@@ -380,5 +381,141 @@ class FlipDia(Flow, Diagrammatic):
         -------
         tuple[Tensor, Tensor]
             Flipped diagrams and log det of the permutation, so zero
+        """
+        return self.forward(z)
+
+
+class DBFlip(Flow, Diagrammatic):
+    """
+    Diagrammatic permutation flip that allows to swap the content of a particular block inside the diagram doesn't matter the type.
+    """
+    def __init__(self, block: int | str):
+        """
+        Constructor
+
+        Construct a Diagrammatic permutation that flips the content inside the selected block of the diagram
+
+        Parameters
+        ----------
+        block
+            Name or index of the selected block
+        """
+        super().__init__()
+
+        self.__type = self.get_block_type(block)
+        self.__b    = block if isinstance(block, int) else self.get_block(block)
+
+
+    def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Override of the torch.nn.Module method
+
+        Flips the selected block of the given batch of diagrams
+
+        Parameters
+        ----------
+        z
+            Batch of diagrams
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Flipped diagrams and log det, so zero
+        """
+        beg = self.get_dia_comp()[self.__b, 0]
+        end = self.get_dia_comp()[self.__b, 1]
+
+        if self.__type == block_types.tm_ordered:
+            return torch.cat( (z[:, :beg], self.__flip_tm_ordered(z[:, beg:end]), z[:, end:]), dim=1), torch.zeros(z.shape[0], device=z.device)
+
+        return torch.cat( (z[:, :beg], torch.flip(z[:, beg:end], dims=(1,)), z[:, end:]), dim=1), torch.zeros(z.shape[0], device=z.device)
+
+    def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Inverse of the permutation, so the permutation itself in this case
+
+        Parameters
+        ----------
+        z
+            Batch of diagrams
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Flipped diagrams and log det, so zero
+        """
+        return self.forward(z)
+
+
+    def __flip_tm_ordered(self, tm_b: Tensor) -> Tensor:
+        """
+        Utility function to flip the time ordered block so that the couples remains in the right order
+
+        Parameters
+        ----------
+        tm_b
+            time ordered block to flip
+
+        Returns
+        -------
+        Tensor
+            Flipped block
+        """
+        return torch.flip(tm_b.reshape(tm_b.shape[0], tm_b.shape[1] // 2, 2), dims=(1,)).flatten(1)
+
+
+
+class DBsFlip(Flow, Diagrammatic):
+    """
+    Diagrammatic permutation that flips every block inside the diagram one by one
+    """
+    def __init__(self):
+        """
+        Constructor
+
+        Create a Diagrammatic permutation that flips all the block inside the diagram
+        """
+        super().__init__()
+
+        net = []
+        for block in range(len(self.get_block_types())):
+            net.append(DBFlip(block))
+        self.__net = nn.ModuleList(net)
+
+
+    def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Override of the torch.nn.Module method
+
+        Flips every block inside the diagram batch
+
+        Parameters
+        ----------
+        z
+            Batch of diagrams
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Batch with flipped diagrams and log det, so zero
+        """
+        for net in self.__net:
+            z, _ = net(z)
+        return z, torch.zeros(z.shape[0], device=z.device)
+
+
+    def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Inverse of the permutation that is equal to the forward in this case
+
+        Parameters
+        ----------
+        z
+            Batch of diagrams
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+             Batch with flipped diagrams and log det, so zero
         """
         return self.forward(z)

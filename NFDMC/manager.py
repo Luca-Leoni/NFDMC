@@ -152,6 +152,21 @@ class Manager(nn.Module):
             z, log_det = flow(z)
             mlog_p -= log_det
 
+            if (z[:, 0] > 50).any():
+                print(z[z[:, 0] > 50])
+                raise RuntimeError("Order overshoot!")
+
+            if (z[:, 1] > 50).any():
+                print(z[z[:,1] > 50])
+                raise RuntimeError("Time of flight overshoot!")
+
+            if (z[:, 2:] > z[:, 1:2]).any():
+                print(z[(z[:, 2:] > z[:, 1:2]).any(dim=1)])
+                raise RuntimeError("Phonon time overshoot!")
+
+            if torch.isnan(log_det).any():
+                print(z[torch.isnan(log_det)])
+
         tlog_p = self._target.log_prob(z)
 
         return - torch.mean(tlog_p) + torch.mean(mlog_p)

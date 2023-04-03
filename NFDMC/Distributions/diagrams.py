@@ -1,5 +1,6 @@
 import torch
 import math
+import torch.nn as nn
 
 from torch import Tensor
 from ..Archetypes import Distribution, RSDistribution, Diagrammatic
@@ -43,29 +44,51 @@ class Holstein(Distribution, Diagrammatic):
         Tensor
             log probabilities of the batch
         """
-        dia_con = self.get_dia_comp()
-        beg_ph = dia_con[2, 0]
-        end_ph = dia_con[2, 1]
-
-        # If time ordering or positiveness is not respected give really low probability
-        # ordered = (z[:, beg_ph:end_ph:2] < z[:, beg_ph+1:end_ph:2]).all(dim=1)
-        # positive = (z >= 0).all(dim=1)
-
-        # if (ordered != positive).all():
-        #     print(z)
+        # Get time of flight
+        tm_fly = self.get_block_from("tm_fly", z)
 
         # Tranform first element in order of diagram
-        order = torch.floor(z[:,dia_con[0,0]:dia_con[0,1]])*2
+        order = torch.floor(self.get_block_from("order", z))*2
 
         # Set to zero the element out of the order
         zeros = torch.arange(z.shape[1] - 2, device=z.device) >= order
-        log_weight = torch.clone(z[:, beg_ph:end_ph])
+        log_weight = torch.clone(self.get_block_from("phonons", z))
         log_weight[zeros] = 0
 
-
         # Compute the weight
-        log_weight =  (self.__g * order + self.__mu * z[:, dia_con[1,0]:dia_con[1,1]]).flatten() +  self.__om * torch.sum((log_weight[:, ::2] - log_weight[:, 1::2]), dim=1)
+        log_weight =  (self.__g * order - self.__mu * tm_fly).flatten() +  self.__om * torch.sum((log_weight[:, ::2] - log_weight[:, 1::2]), dim=1)
 
         # select right output
         return log_weight
-        # return torch.where(ordered == positive, log_weight, -1000000 * torch.abs(log_weight)) 
+
+
+
+class BaseHolstein(Distribution, Diagrammatic):
+    def __init__(self, max_order: int, trainable: bool = False, rateo: Tensor = torch.tensor(1.0)) -> None:
+        super().__init__()
+
+        self.__max = max_order
+
+        if trainable:
+            self.rateo = nn.Parameter(rateo)
+        else:
+            self.register_buffer("rateo", rateo)
+
+
+    def forward(self, num_sample: int = 1) -> tuple[Tensor, Tensor]:
+        samples = self.sample(num_sample)
+        return samples, self.log_prob(samples)
+
+
+    def sample(self, num_sample: int = 1) -> Tensor:
+        order  = torch.rand(size=(num_sample, 1), device=self.rateo.device) * self.__max * 0.5
+        tm_fly = -torch.log(torch.rand(size=(num_sample, 1), device=self.rateo.device)) / self.rateo
+        couple = torch.rand(size=(num_sample, self.__max), device=self.rateo.device) * tm_fly
+
+        return torch.cat((order, tm_fly, couple), dim=1)
+
+
+    def log_prob(self, z: Tensor) -> Tensor:
+        tm_fly = self.get_block_from("tm_fly", z).flatten()
+
+        return torch.log(self.rateo) - self.rateo*tm_fly - math.log(0.5*self.__max) - self.__max * torch.log(tm_fly)

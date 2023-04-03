@@ -159,11 +159,18 @@ class PAffine(Transformer):
         Tensor
             Log determinant
         """
-        a = torch.exp(h[:, ::3])
-        b = torch.exp(h[:, 1::3])
-        c = torch.exp(h[:, 2::3])
+        res = h[:, 1::3] - h[:, ::3] - h[:, 2::3]
+        res = torch.logsumexp(torch.cat((res, torch.zeros(h.shape[0], 1, device=h.device)), dim=1), dim=1)
 
-        return -torch.sum(torch.log(1 + b/(a*c)), dim=1)
+        nan = torch.isnan(res)
+        if nan.any():
+            print("\nFrom PAffine transformer:")
+            print(torch.arange(_.shape[0], device=nan.device)[nan])
+            print(_[nan, :])
+            print(h[nan, :])
+            print()
+
+        return -res
 
 
 
@@ -180,10 +187,10 @@ class CPAffine(Transformer):
                 \tau(z; a, b, c, L) = \frac{e^a z + e^b}{e^a + e^{b}/d}, \hspace{2cm} d = \frac{L}{1 + e^c} 
         In this way one can see how if $z>0$ than also the result is constrined to the range $[0, L]$ for every possible values of $a, b$ and $c$. Also, one can see how the derivative is always between 0 and 1 so that is invertible and analitically computable.
         """
-        super().__init__(4)
+        super().__init__(3)
 
 
-    def forward(self, z: Tensor, h: Tensor) -> Tensor:
+    def forward(self, z: Tensor, *H: Tensor) -> Tensor:
         """
         Override of the torch.nn.Module method
 
@@ -199,14 +206,22 @@ class CPAffine(Transformer):
         Tensor
             Output variable
         """
-        a = torch.exp(h[:, ::4])
-        b = torch.exp(h[:, 1::4])
-        c = h[:, 3::4]/(1 + torch.exp(h[:, 2::4]))
+        use_L = len(H) == 2
+        if use_L:
+            h, L = H
+        else:
+            h, = H
 
-        return (a * z + b) / (a + b/c)
+        a = torch.exp(-h[:, ::3])
+        c = 0.98*h[:, 2::3]/(1 + torch.exp(h[:, 1::3]))
+
+        if use_L:
+            return c * ((z + a) / (L + a)) # pyright: ignore
+        else:
+            return c * ((z + a) / (h[:, 2::3] + a))
 
 
-    def inverse(self, z: Tensor, h: Tensor) -> Tensor:
+    def inverse(self, z: Tensor, *H: Tensor) -> Tensor:
         r"""
         Inverse transformation evaluated through:
             .. math::
@@ -224,13 +239,21 @@ class CPAffine(Transformer):
         Tensor
             Untransformed variable
         """
-        a = torch.exp(h[:, ::4])
-        b = torch.exp(h[:, 1::4])
-        c = h[:, 3::4]/(1 + torch.exp(h[:, 2::4]))
+        use_L = len(H) == 2
+        if use_L:
+            h, L = H
+        else:
+            h, = H
 
-        return ((a + b/c)*z - b) / a
+        a = torch.exp(-h[:, ::3])
+        c = 0.98*h[:, 2::3]/(1 + torch.exp(h[:, 1::3]))
 
-    def log_det(self, _: Tensor, h: Tensor) -> Tensor:
+        if use_L:
+            return a*((L + a) * z / c - 1) #pyright: ignore
+        else:
+            return a*((h[:, 2::3] + a) * z / c - 1)
+
+    def log_det(self, _: Tensor, *H: Tensor) -> Tensor:
         r"""
         Compute the log determinant of the Jacobian which ends up in being simply:
             .. math::
@@ -248,8 +271,24 @@ class CPAffine(Transformer):
         Tensor
             Log determinant
         """
-        a = torch.exp(h[:, ::4])
-        b = torch.exp(h[:, 1::4])
-        c = h[:, 3::4]/(1 + torch.exp(h[:, 2::4]))
+        use_L = len(H) == 2
+        if use_L:
+            h, L = H
+        else:
+            h, = H
 
-        return -torch.sum(torch.log(1 + b/(a*c)), dim=1)
+        a = torch.exp(-h[:, ::3])
+        c = 0.98*h[:, 2::3]/(1 + torch.exp(h[:, 1::3]))
+
+        nan = torch.isnan(torch.sum(torch.log(c) - torch.log(h[:, 2::3] + a), dim=1))
+        if nan.any():
+            print("\nFrom CPAffine transformer:")
+            print(torch.arange(_.shape[0], device=nan.device)[nan])
+            print(_[nan, :])
+            print(h[nan, :])
+            print()
+
+        if use_L:
+            return torch.sum(torch.log(c) - torch.log(L + a), dim=1)
+        else:
+            return torch.sum(torch.log(c) - torch.log(h[:, 2::3] + a), dim=1)
