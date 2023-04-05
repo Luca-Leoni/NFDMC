@@ -148,24 +148,44 @@ class Manager(nn.Module):
             raise ValueError("The target distribution needs to be defined to perform reverse KLD measure!")
 
         z, mlog_p = self._base(num_sample)
-        for flow in self._flows:
+
+        bad = (z[:, 0] > 25) | (z[:, 0] <= 0) | (z[:, 1] <= 0) | (z[:, 1] > 50)
+        if bad.any():
+            print(z[bad])
+            raise RuntimeError("Generation fucked up!")
+
+        for i, flow in enumerate(self._flows):
             z, log_det = flow(z)
             mlog_p -= log_det
 
-            if (z[:, 0] > 50).any():
-                print(z[z[:, 0] > 50])
-                raise RuntimeError("Order overshoot!")
+            if (z[:, 0] > 25).any():
+                print(z[z[:, 0] > 25])
+                raise RuntimeError(f"Order overshoot from flow {i}!")
 
             if (z[:, 1] > 50).any():
                 print(z[z[:,1] > 50])
-                raise RuntimeError("Time of flight overshoot!")
+                raise RuntimeError(f"Time of flight overshoot from flow {i}!")
 
             if (z[:, 2:] > z[:, 1:2]).any():
                 print(z[(z[:, 2:] > z[:, 1:2]).any(dim=1)])
-                raise RuntimeError("Phonon time overshoot!")
+                raise RuntimeError(f"Phonon time overshoot from flow {i}!")
+            
+            bad = (z[:, 2::2] > z[:, 3::2]).any(dim=1)
+            if bad.any() and i > 6:
+                print(z[bad])
+                raise RuntimeError(f"Phonon time unordered from flow {i}!")
 
-            if torch.isnan(log_det).any():
-                print(z[torch.isnan(log_det)])
+            bad = torch.isnan(log_det) | torch.isinf(log_det)
+            if bad.any():
+                print(z[bad])
+                raise RuntimeError(f"Log det exploded from flow {i}!")
+            
+            bad = torch.isnan(mlog_p) | torch.isinf(mlog_p)
+            if bad.any():
+                print(z[bad])
+                print(log_det[bad])
+                raise RuntimeError(f"Model prob exploded from flow {i}!")
+
 
         tlog_p = self._target.log_prob(z)
 

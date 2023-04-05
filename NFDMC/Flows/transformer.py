@@ -1,6 +1,6 @@
 import torch
 
-from ..Archetypes import Transformer, Diagrammatic
+from ..Archetypes import Transformer, LTransformer
 from torch import Tensor
 
 #-------------------------------
@@ -174,23 +174,33 @@ class PAffine(Transformer):
 
 
 
-class CPAffine(Transformer):
+class CPAffine(LTransformer):
     """
     Defines the constrained positive Affine transformer a transformation that maps positives entries with positives values within a certain range L without the loose of flexibility of the Affine transformation
     """
-    def __init__(self):
+    def __init__(self, UL: Tensor | float = 0.):
         r"""
         Constructor
 
         The transformation inside this transformer requires three parameters a, b and c so that the transformation looks like the following:
             .. math::
-                \tau(z; a, b, c, L) = \frac{e^a z + e^b}{e^a + e^{b}/d}, \hspace{2cm} d = \frac{L}{1 + e^c} 
-        In this way one can see how if $z>0$ than also the result is constrined to the range $[0, L]$ for every possible values of $a, b$ and $c$. Also, one can see how the derivative is always between 0 and 1 so that is invertible and analitically computable.
+                \tau(z, L ,C; a, b) = c\frac{z + e^{-a}}{L + e^{-a}}, \hspace{2cm} c = \frac{C}{1 + e^b} 
+        In this way one can see how if $z\in [0, L]$ than also the result is constrined to the range $[0, C]$ for every possible values of $a, b$. Also, one can see how the derivative is always between 0 and 1 so that is invertible and analitically computable.
+
+        The values of the constrains can be selected using the set_upper_limit function of the limited transformer, and can be passed as:
+            - float value, so that the same float will be used for both C and L
+            - A tensor with a value for every element in the batch that will be used for both C and L
+            - A tensor with two entries for every element batch defining C and L
+
+        Parameters
+        ----------
+        UL
+            Upper limit for the constrains
         """
-        super().__init__(3)
+        super().__init__(2, UL)
 
 
-    def forward(self, z: Tensor, *H: Tensor) -> Tensor:
+    def forward(self, z: Tensor, h: Tensor) -> Tensor:
         """
         Override of the torch.nn.Module method
 
@@ -206,22 +216,14 @@ class CPAffine(Transformer):
         Tensor
             Output variable
         """
-        use_L = len(H) == 2
-        if use_L:
-            h, L = H
-        else:
-            h, = H
+        L, C = self.get_constains()
+        a = torch.exp(-h[:, ::2])
+        c = C/(1 + torch.exp(h[:, 1::2]))
 
-        a = torch.exp(-h[:, ::3])
-        c = 0.98*h[:, 2::3]/(1 + torch.exp(h[:, 1::3]))
-
-        if use_L:
-            return c * ((z + a) / (L + a)) # pyright: ignore
-        else:
-            return c * ((z + a) / (h[:, 2::3] + a))
+        return c * ((z + a) / (L + a)) # pyright: ignore
 
 
-    def inverse(self, z: Tensor, *H: Tensor) -> Tensor:
+    def inverse(self, z: Tensor, h: Tensor) -> Tensor:
         r"""
         Inverse transformation evaluated through:
             .. math::
@@ -239,21 +241,13 @@ class CPAffine(Transformer):
         Tensor
             Untransformed variable
         """
-        use_L = len(H) == 2
-        if use_L:
-            h, L = H
-        else:
-            h, = H
+        L, C = self.get_constains()
+        a = torch.exp(-h[:, ::2])
+        c = C/(1 + torch.exp(h[:, 1::2]))
 
-        a = torch.exp(-h[:, ::3])
-        c = 0.98*h[:, 2::3]/(1 + torch.exp(h[:, 1::3]))
+        return (L + a) * z / c - a
 
-        if use_L:
-            return a*((L + a) * z / c - 1) #pyright: ignore
-        else:
-            return a*((h[:, 2::3] + a) * z / c - 1)
-
-    def log_det(self, _: Tensor, *H: Tensor) -> Tensor:
+    def log_det(self, _: Tensor, h: Tensor) -> Tensor:
         r"""
         Compute the log determinant of the Jacobian which ends up in being simply:
             .. math::
@@ -271,24 +265,32 @@ class CPAffine(Transformer):
         Tensor
             Log determinant
         """
-        use_L = len(H) == 2
-        if use_L:
-            h, L = H
-        else:
-            h, = H
+        L, C = self.get_constains()
+        a = torch.exp(-h[:, ::2])
+        c = C/(1 + torch.exp(h[:, 1::2]))
 
-        a = torch.exp(-h[:, ::3])
-        c = 0.98*h[:, 2::3]/(1 + torch.exp(h[:, 1::3]))
+        res = torch.sum(torch.log(c) - torch.log(L+a), dim=1)
 
-        nan = torch.isnan(torch.sum(torch.log(c) - torch.log(h[:, 2::3] + a), dim=1))
-        if nan.any():
+        bad = torch.isnan(res) | torch.isinf(res)
+        if bad.any():
             print("\nFrom CPAffine transformer:")
-            print(torch.arange(_.shape[0], device=nan.device)[nan])
-            print(_[nan, :])
-            print(h[nan, :])
+            print(torch.arange(_.shape[0], device=bad.device)[bad])
+            print(_[bad, :])
+            print(h[bad, :])
             print()
 
-        if use_L:
-            return torch.sum(torch.log(c) - torch.log(L + a), dim=1)
+        return res
+
+
+    def get_constains(self):
+        """
+        Utility to retrive the constrains inside the transformation from the upeer limit inserted inside the transformer
+        """
+        if len(self.UL.shape) == 0:
+            return self.UL, self.UL
+        elif self.UL.shape[1] == 1 and len(self.UL.shape) == 2:
+            return self.UL, self.UL
+        elif  self.UL.shape[1] == 2 and len(self.UL.shape) == 2:
+            return self.UL[:, 0:1], self.UL[:, 1:2]
         else:
-            return torch.sum(torch.log(c) - torch.log(h[:, 2::3] + a), dim=1)
+            return self.UL[:, 0, ...], self.UL[:, 1, ...]

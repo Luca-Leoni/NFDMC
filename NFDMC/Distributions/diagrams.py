@@ -64,15 +64,112 @@ class Holstein(Distribution, Diagrammatic):
 
 
 class BaseHolstein(Distribution, Diagrammatic):
-    def __init__(self, max_order: int, trainable: bool = False, rateo: Tensor = torch.tensor(1.0)) -> None:
+    """
+    Base distribution used for the single site Holstein model
+    """
+    def __init__(self, max_order: int, max_tm_fly: float = 50., trainable: bool = False, rateo: Tensor = torch.tensor(1.0)) -> None:
+        r"""
+        Constructor
+
+        Creates a base distribution for the single site Holstein model, where the three main type of variables are drown in the following way:
+            - order ~ $U(0,$ max_order)
+            - tm_fly ~ $E(\tau; rateo) = rateo e^{-rateo\tau}$
+            - phonon ~ $U(0,$ tm_fly)
+
+        Parameters
+        ----------
+        max_order
+            Maximum order possible for the diagram, will also define the dimension of the array representing the diagram
+        trainable
+            Tells if the rateo can be trained like a parameter
+        rateo
+            Initial value of the decaing rate in the exponential distribution of the time of flight
+        """
         super().__init__()
 
-        self.__max = max_order
+        self.__max_or = max_order
+        self.__max_tm = max_tm_fly
 
         if trainable:
-            self.rateo = nn.Parameter(rateo)
+            self.rateo_tm = nn.Parameter(rateo)
+            self.rateo_or = nn.Parameter(rateo)
         else:
-            self.register_buffer("rateo", rateo)
+            self.register_buffer("rateo_tm", rateo)
+            self.register_buffer("rateo_or", rateo)
+
+
+    def forward(self, num_sample: int = 1) -> tuple[Tensor, Tensor]:
+        """
+        Override of the torch.nn.Module method
+
+        Sample a wanted number of diagrams from the distribution and returns the log probability of them
+
+        Parameters
+        ----------
+        num_sample
+            Number of diagrams to draw
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Batch of diagrams and log probability of them
+        """
+        samples = self.sample(num_sample)
+        return samples, self.log_prob(samples)
+
+
+    def sample(self, num_sample: int = 1) -> Tensor:
+        """
+        Sample from the distribution as described in the constructor.
+        
+        The order of the diagram is generated between 0 and half of the max_order since in the target distribution such value is multiplied by 2 in order to have an even order since the model requires it.
+
+        Parameters
+        ----------
+        num_sample
+            Number of diagrams to draw
+
+        Returns
+        -------
+        Tensor
+            Batch of diagrams
+        """
+        R = torch.rand(size=(num_sample, 2), device=self.rateo_tm.device) * 0.9999999
+        order  = -torch.log(0.9999999 - R[:, 0:1] * (1 - torch.exp(-self.rateo_or * self.__max_or * 0.5))) / self.rateo_or
+        tm_fly = -torch.log(0.9999999 - R[:, 1:2] * (1 - torch.exp(-self.rateo_tm * self.__max_tm))) / self.rateo_tm
+        couple = torch.rand(size=(num_sample, self.__max_or), device=self.rateo_tm.device) * tm_fly
+
+        return torch.cat((order, tm_fly, couple), dim=1)
+
+
+    def log_prob(self, z: Tensor) -> Tensor:
+        r"""
+        Computes the log probability of the batch of diagrams given
+        .. math::
+            \log p = -\log(max_order/2) + \log(rateo) - rateo\tau - max_order\log(\tau)
+
+        Parameters
+        ----------
+        z
+            Batch of diagrams
+
+        Returns
+        -------
+        Tensor
+            Log probability of every diagram
+        """
+        tm_fly = self.get_block_from("tm_fly", z).flatten()
+        order  = self.get_block_from("order", z).flatten()
+
+        return torch.log(self.rateo_tm * self.rateo_or) - torch.log(1 - torch.exp(-self.rateo_tm * self.__max_tm)) - torch.log(1 - torch.exp(-self.rateo_or * self.__max_or * 0.5)) - self.rateo_tm * tm_fly - self.rateo_or * order - self.__max_or * torch.log(tm_fly)
+
+
+class SBaseHolstein(Distribution):
+    def __init__(self, tm_fly: float, max_order: int) -> None:
+        super().__init__()
+
+        self.__tm_fly = torch.tensor(tm_fly)
+        self.__max    = max_order
 
 
     def forward(self, num_sample: int = 1) -> tuple[Tensor, Tensor]:
@@ -81,14 +178,30 @@ class BaseHolstein(Distribution, Diagrammatic):
 
 
     def sample(self, num_sample: int = 1) -> Tensor:
-        order  = torch.rand(size=(num_sample, 1), device=self.rateo.device) * self.__max * 0.5
-        tm_fly = -torch.log(torch.rand(size=(num_sample, 1), device=self.rateo.device)) / self.rateo
-        couple = torch.rand(size=(num_sample, self.__max), device=self.rateo.device) * tm_fly
-
-        return torch.cat((order, tm_fly, couple), dim=1)
+        order  = -torch.log(torch.rand(num_sample, 1, device=self.__tm_fly.device))
+        phonon = torch.rand(num_sample, self.__max, device=self.__tm_fly.device) * self.__tm_fly
+        return torch.cat( (order, phonon), dim=1 )
 
 
     def log_prob(self, z: Tensor) -> Tensor:
-        tm_fly = self.get_block_from("tm_fly", z).flatten()
+        return -z[:, 0] - self.__max * torch.log(self.__tm_fly)
 
-        return torch.log(self.rateo) - self.rateo*tm_fly - math.log(0.5*self.__max) - self.__max * torch.log(tm_fly)
+
+class SHolstein(Distribution):
+    def __init__(self, phonon: float, coupling: float) -> None:
+        super().__init__()
+
+        self.__Omega = phonon
+        self.__g = math.log(coupling)
+
+
+    def log_prob(self, z: Tensor) -> Tensor:
+        order  = torch.floor(z[:, 0:1])
+        phonon = z[:, 1:]
+
+        zeros  = torch.arange(phonon.shape[1], device=z.device).expand(*phonon.shape) > order
+        phonon[zeros] = 0
+
+        return self.__g * order * 2 - self.__Omega * torch.sum(phonon, dim=1)
+
+

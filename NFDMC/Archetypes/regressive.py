@@ -183,3 +183,68 @@ class Transformer(nn.Module):
             Needs to be implemented by the user
         """
         raise NotImplementedError()
+
+
+
+class LTransformer(Transformer):
+    """
+    Transformer that defines a function with more input that defines limits for the transformation itself.
+    """
+    def __init__(self, trans_features: int, UL: Tensor | float = 0., LL: Tensor | float = 0.):
+        """
+        Constructor
+
+        Creates a transformer that defines a function of the tipe $\tau(z, UL, LL; \amthbf{h})$ where the other input variables gives the limits or constrains for the transformation itself.
+
+        Parameters
+        ----------
+        trans_features
+            Number of features for input variables needed in the transformer
+        UL
+            Upper limit of the transformer
+        LL
+            Lower limit of the transformer
+        """
+        super().__init__(trans_features)
+
+        self.UL = torch.tensor(UL) if isinstance(UL, float) else UL
+        self.LL = torch.tensor(LL) if isinstance(LL, float) else LL
+
+        self.__controll()
+
+    def set_upper_limit(self, UL: Tensor | float) -> None:
+        """
+        Set the value of the upper limit inside the transformation
+
+        Parameters
+        ----------
+        UL
+            Value of the upper limit, can be a flaot or a tensor depending on the needs
+        """
+        self.UL = torch.tensor(UL) if isinstance(UL, float) else UL
+
+        self.__controll()
+
+    def set_lower_limit(self, LL: Tensor | float) -> None:
+        """
+        Set the value of the lower limit inside the transformer
+
+        Parameters
+        ----------
+        LL
+            Value of the lower limit, can be a flaot or a tensor depending on the needs
+        """
+        self.LL = torch.tensor(LL) if isinstance(LL, float) else LL
+
+        self.__controll()
+
+    def __controll(self):
+        """
+        Utility controll function so that the limits are always in the right format  
+        """
+        if len(self.UL.shape) == 1:
+            self.UL = self.UL.reshape(self.UL.shape[0], 1)
+
+        if len(self.LL.shape) == 1:
+            self.LL = self.LL.reshape(self.LL.shape[0], 1)
+
