@@ -8,6 +8,7 @@ from .flow import Flow
 # Archetypes for flow construction
 from .regressive import Conditioner
 from .regressive import Transformer
+from .regressive import LTransformer
 
 # Archetipes for dmc
 from .dmc import Diagrammatic

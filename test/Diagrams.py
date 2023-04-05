@@ -41,7 +41,7 @@ def test_Holstein(max_order: int):
     Diagrammatic.clear()
     Diagrammatic.add_block("order", 1, block_types.integer)
     Diagrammatic.add_block("tm_fly", 1, block_types.floating)
-    Diagrammatic.add_block("phonon", max_order, block_types.tm_ordered)
+    Diagrammatic.add_block("phonons", max_order, block_types.tm_ordered)
 
     dis = diagrams.Holstein(1, 0.2, 0.5)
 
@@ -58,8 +58,6 @@ def test_Holstein(max_order: int):
     log_p = dis.log_prob(z)
 
     assert log_p.shape == (2,)
-    # assert log_p[1] <= -100
-    # assert log_p[0] != -1000000
 
 
 @given(n_blocks=st.integers(min_value=2, max_value=10))
@@ -297,8 +295,11 @@ def test_CPAffine_TOBCoupling(batch, block: int):
 
     flow = TOBCoupling(block+1, transformer.CPAffine()).to("cuda")
 
+    print("Forward")
     transformed, log_det = flow(diagrams)
+    print("Inverse")
     inversed, log_det_in = flow.inverse(transformed) 
+    print()
 
     # Present only to see if the backward is possible
     torch.sum(log_det).backward()
@@ -345,8 +346,6 @@ def test_DBFlip_tm_ordered(batch, n_block):
     assert (diagrams[:, :beg] == permuted[:, :beg]).all()
     assert (diagrams[:, end:] == permuted[:, end:]).all()
     assert (permuted[:, beg:end] == torch.flip(diagrams[:, beg:end].reshape(batch, lenghts[block] // 2, 2), dims=(1,)).flatten(1)).all()
-
-
 
 #--------------------------------------
 
