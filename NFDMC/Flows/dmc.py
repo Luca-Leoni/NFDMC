@@ -135,9 +135,6 @@ class OBCoupling(Flow, Diagrammatic):
             if bt == block_types.tm_ordered:
                 max += self.get_blocks_lenght()[i] // 2
         self.__trans.set_upper_limit(max)
-        
-        # For debugging
-        self.__max = max
 
     
     def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
@@ -160,13 +157,6 @@ class OBCoupling(Flow, Diagrammatic):
         z1, z2 = torch.split(z, self.__split, dim=1)
         h  = self.__cond(z1)
         z, _ = self.__swap(torch.cat((z1, self.__trans(z2, h)), dim=1))
-
-        bad = (z[:, 0] > self.__max)
-        if bad.any():
-            print("From OBCoupling:\n")
-            print(z2[bad])
-            print(h[bad])
-            print(self.__trans(z2, h)[bad])
 
         return  z, self.__trans.log_det(z2, h)
 
@@ -263,14 +253,6 @@ class TFBCoupling(Flow, Diagrammatic):
         self.__set_limit(max)
 
         z, _ = self.__swap(torch.cat((z1, self.__trans(z2, h) + max), dim=1))
-
-        bad = (z > self.__max).any(dim=1)
-        if bad.any():
-            print("From TFBCoupling:\n")
-            print(z2[bad])
-            print(h[bad])
-            print(max[bad])
-            print(self.__trans(z2, h)[bad])
 
         return  z, self.__trans.log_det(z2, h)
 
@@ -409,17 +391,6 @@ class TOBCoupling(Flow, Diagrammatic):
 
         # Evaluate the new destruction times
         td = self.__trans(z2[:, 1::2], h[:, 1::2, :].flatten(1)) + tc
-
-        zf = torch.cat( (tc.unsqueeze(-1), td.unsqueeze(-1)), dim=2 ).flatten(1)
-        bad = (zf > z[:, 1:2]).any(dim=1) | (td < tc).any(dim=1)
-        bad = bad | torch.isnan(zf).any(dim=1) | torch.isinf(zf).any(dim=1)
-        if bad.any():
-            print("FromTOBCoupling:\n")
-            print(f"Old tmd:\n{z2[bad]}")
-            print(f"Old tmc:\n{z1[bad]}")
-            print(f"New tmd\n{td[bad]}")
-            print(f"New tmc:\n{tc[bad]}")
-            print(f"Parameters:\n{h[bad]}")
 
         # Reconstruct couples
         z2 = torch.cat( (tc.unsqueeze(-1), td.unsqueeze(-1)), dim=2 ).flatten(1)

@@ -162,14 +162,6 @@ class PAffine(Transformer):
         res = h[:, 1::3] - h[:, ::3] - h[:, 2::3]
         res = torch.logsumexp(torch.cat((res, torch.zeros(h.shape[0], 1, device=h.device)), dim=1), dim=1)
 
-        nan = torch.isnan(res)
-        if nan.any():
-            print("\nFrom PAffine transformer:")
-            print(torch.arange(_.shape[0], device=nan.device)[nan])
-            print(_[nan, :])
-            print(h[nan, :])
-            print()
-
         return -res
 
 
@@ -269,17 +261,7 @@ class CPAffine(LTransformer):
         a = torch.exp(-h[:, ::2])
         c = C/(1 + torch.exp(h[:, 1::2]))
 
-        res = torch.sum(torch.log(c) - torch.log(L+a), dim=1)
-
-        bad = torch.isnan(res) | torch.isinf(res)
-        if bad.any():
-            print("\nFrom CPAffine transformer:")
-            print(torch.arange(_.shape[0], device=bad.device)[bad])
-            print(_[bad, :])
-            print(h[bad, :])
-            print()
-
-        return res
+        return torch.sum(torch.log(c) - torch.log(L+a), dim=1)
 
 
     def get_constains(self):
