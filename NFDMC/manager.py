@@ -149,7 +149,7 @@ class Manager(nn.Module):
 
         z, mlog_p = self._base(num_sample)
 
-        bad = (z[:, 0] > 25) | (z[:, 0] <= 0) | (z[:, 1] <= 0) | (z[:, 1] > 50)
+        bad = (z[:, 0] > 50) | (z[:, 0] <= 0) | (z[:, 1] <= 0) | (z[:, 1] > 50)
         if bad.any():
             print(z[bad])
             raise RuntimeError("Generation fucked up!")
@@ -158,8 +158,8 @@ class Manager(nn.Module):
             z, log_det = flow(z)
             mlog_p -= log_det
 
-            if (z[:, 0] > 25).any():
-                print(z[z[:, 0] > 25])
+            if (z[:, 0] > 50).any():
+                print(z[z[:, 0] > 50])
                 raise RuntimeError(f"Order overshoot from flow {i}!")
 
             if (z[:, 1] > 50).any():
