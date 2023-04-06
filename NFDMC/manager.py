@@ -47,7 +47,7 @@ class Manager(nn.Module):
             z, _ = flow(z)
         return z
 
-    def sample(self, num_sample: int = 1) -> tuple[Tensor, Tensor]:
+    def sample(self, num_sample: int = 1) -> Tensor:
         r"""
         Sample from the approximated distribution giving the batch of wanted samples and the log probability
 
@@ -63,14 +63,13 @@ class Manager(nn.Module):
 
         Returns
         -------
-        tuple[Tensor, Tensor]
-            tuple containing the batch with all the samples and a tensor with the final log probabilities
+        Tensor
+            Batch of samples from the approximated distribution
         """
-        z, log_p = self._base(num_sample)
+        z, _ = self._base(num_sample)
         for flow in self._flows:
-            z, log_det = flow(z)
-            log_p -= log_det
-        return z, log_p
+            z, _ = flow(z)
+        return z
 
     def log_prob(self, z: Tensor) -> Tensor:
         """
