@@ -34,7 +34,8 @@ class Distribution(nn.Module):
         Not implemented:
             If is not implemented in the costumazied distribution it fails
         """
-        raise NotImplementedError
+        samples = self.sample(num_sample)
+        return samples, self.log_prob(samples)
 
     def log_prob(self, z: Tensor) -> Tensor:
         """

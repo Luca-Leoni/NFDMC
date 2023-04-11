@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from torch import Tensor
+from torch import Tensor, dtype
 from ..Archetypes import Distribution, RSDistribution
 
 #---------------------------------
@@ -10,7 +10,7 @@ class MultiGaussian(Distribution):
     """
     Multivariate Gaussian distribution with diagonal covariance matrix for generating a D dimensional vector with entries composed of independent Gaussian variables.
     """
-    def __init__(self, dimension: int, trainable: bool = True):
+    def __init__(self, dimension: int, trainable: bool = True, mean: float = 0, std_dev: float = 1):
         """
         Constructor
 
@@ -25,14 +25,14 @@ class MultiGaussian(Distribution):
         """
         super().__init__()
 
-        self._dim    = dimension
+        self.__dim    = dimension
 
         if trainable:
-            self._mean    = nn.Parameter(torch.zeros(dimension))
-            self._std_dev = nn.Parameter(torch.ones(dimension))
+            self._mean    = nn.Parameter(torch.full((dimension,), mean, dtype=torch.float64))
+            self._std_dev = nn.Parameter(torch.full((dimension,), std_dev, dtype=torch.float64))
         else:
-            self.register_buffer("_mean", torch.zeros(dimension))
-            self.register_buffer("_std_dev", torch.ones(dimension))
+            self.register_buffer("_mean", torch.full((dimension,), mean, dtype=torch.float64))
+            self.register_buffer("_std_dev", torch.full((dimension,), std_dev, dtype=torch.float64))
 
 
     def forward(self, num_sample: int = 1) -> tuple[Tensor, Tensor]:
@@ -70,8 +70,8 @@ class MultiGaussian(Distribution):
         Tensor
             Tensor with the log probabilities of the samples
         """
-                # log(sqrt(2*pi))
-        return - 0.9189385332046727 - torch.log(torch.prod(self._std_dev)) - torch.sum(torch.pow((z - self._mean)/self._std_dev, 2), 1)/2
+                              # log(sqrt(2*pi))
+        return - self.__dim * 0.9189385332046727 - torch.sum(torch.log(self._std_dev) + 0.5 * torch.pow((z - self._mean)/self._std_dev, 2), dim=1)
 
     def sample(self, num_sample: int = 1) -> Tensor:
         """ 
@@ -87,7 +87,7 @@ class MultiGaussian(Distribution):
         Tensor
             Batch with the samples
         """
-        z = torch.randn( (num_sample, self._dim), dtype=self._mean.dtype, device=self._mean.device)
+        z = torch.randn( (num_sample, self.__dim), dtype=self._mean.dtype, device=self._mean.device)
         return self._mean + z * self._std_dev
 
 
@@ -193,7 +193,7 @@ class MultiModalGaussian(Distribution):
 
 
 class MultiExponential(Distribution):
-    def __init__(self, n_dim: int, trainable: bool = False, rateo: Tensor | None = None):
+    def __init__(self, n_dim: int, trainable: bool = False, rateo: Tensor | float = 1.):
         r"""
         Constructor
 
@@ -215,13 +215,15 @@ class MultiExponential(Distribution):
 
         self.__n_dim = n_dim
 
-        if isinstance(rateo, type(None)):
-            rateo = torch.tensor(1.0)
+        if isinstance(rateo, float):
+            rateo = torch.full(size=(n_dim,), fill_value=rateo)
+        elif rateo.shape[0] != n_dim:
+            raise ValueError("The ratei tensor dimension don't match the selected one in exponential distribution!")
 
         if trainable:
-            self.rateo = nn.Parameter(rateo)
+            self.rateo = nn.Parameter(rateo.type(torch.float64))
         else:
-            self.register_buffer("rateo", rateo)
+            self.register_buffer("rateo", rateo.type(torch.float64))
 
     def forward(self, num_sample: int = 1) -> tuple[Tensor, Tensor]:
         """
@@ -256,8 +258,8 @@ class MultiExponential(Distribution):
         Tensor
             Batch with the sample
         """
-        z = torch.rand(num_sample, self.__n_dim, device=self.rateo.device)
-        return -torch.log(z)/self.rateo
+        z = torch.rand(num_sample, self.__n_dim, device=self.rateo.device, dtype=torch.float64)
+        return - (-z).log1p() / self.rateo
 
     def log_prob(self, z: Tensor) -> Tensor:
         """
@@ -273,7 +275,7 @@ class MultiExponential(Distribution):
         Tensor
             Log probabilities of the samples
         """
-        return -torch.sum(self.rateo * z, dim=1) + torch.sum(torch.log(self.rateo))
+        return self.rateo.log().sum() - torch.sum(self.rateo * z, dim=1) 
 
 
 class TwoMoon(RSDistribution):

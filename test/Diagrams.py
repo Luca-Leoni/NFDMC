@@ -45,7 +45,7 @@ def test_Holstein(max_order: int):
 
     dis = diagrams.Holstein(1, 0.2, 0.5)
 
-    z = torch.rand(2, max_order+2)
+    z = torch.rand(2, max_order+2, dtype=torch.float64)
     z[:, 0] = torch.randint(low=0, high=max_order, size=(2,))
 
     # Construct a diagram
@@ -245,7 +245,7 @@ def test_dia_flip(batch, n_blocks):
 @settings(deadline=5000)
 @given(batch=st.integers(min_value=1, max_value=100),
        block=st.integers(min_value=0, max_value=4))
-def test_PAffine_BCoupling(batch, block: int):
+def test_Softplus_BCoupling(batch, block: int):
     Diagrammatic.clear()
 
     lenghts = torch.randint(low=1, high=10, size=(5,)).data.numpy()
@@ -255,9 +255,9 @@ def test_PAffine_BCoupling(batch, block: int):
 
     for i in range(5):
         Diagrammatic.add_block(f"block{i}", lenghts[i], block_types.floating)
-    diagrams = torch.rand(batch, np.sum(lenghts)).to("cuda")
+    diagrams = torch.rand(batch, np.sum(lenghts)).to("cuda", dtype=torch.float64)
 
-    flow = BCoupling(block, transformer.PAffine()).to("cuda")
+    flow = BCoupling(block, transformer.Softplus()).to("cuda")
 
     transformed, log_det = flow(diagrams)
     inversed, log_det_in = flow.inverse(transformed)
@@ -265,8 +265,37 @@ def test_PAffine_BCoupling(batch, block: int):
     # Present only to see if the backward is possible
     torch.sum(log_det).backward()
 
-    assert torch.isclose(log_det, -log_det_in, rtol=0, atol=1e-5).all()
-    assert torch.isclose(diagrams, inversed, rtol=0, atol=1e-5).all()
+    assert torch.isclose(log_det, -log_det_in, rtol=0., atol=1e-5).all()
+    assert torch.isclose(diagrams, inversed, rtol=0., atol=1e-5).all()
+    assert (diagrams[:, beg:end] != transformed[:, beg:end]).all()
+    if block != 4:
+        assert (diagrams[:, np.sum(lenghts[:-1]):] == transformed[:, np.sum(lenghts[:-1]):]).all()
+
+@settings(deadline=5000)
+@given(batch=st.integers(min_value=1, max_value=100),
+       block=st.integers(min_value=0, max_value=4))
+def test_Sigmoid_BCoupling(batch, block: int):
+    Diagrammatic.clear()
+
+    lenghts = torch.randint(low=1, high=10, size=(5,)).data.numpy()
+    bias = lenghts[block] // 2 + lenghts[block] % 2
+    beg = np.sum(lenghts[:block]) + bias
+    end = beg + lenghts[block] - bias
+
+    for i in range(5):
+        Diagrammatic.add_block(f"block{i}", lenghts[i], block_types.floating)
+    diagrams = torch.rand(batch, np.sum(lenghts), dtype=torch.float64).to("cuda")
+
+    flow = BCoupling(block, transformer.Sigmoid()).to("cuda")
+
+    transformed, log_det = flow(diagrams)
+    inversed, log_det_in = flow.inverse(transformed)
+
+    # Present only to see if the backward is possible
+    torch.sum(log_det).backward()
+
+    assert torch.isclose(log_det, -log_det_in, rtol=0., atol=1e-5).all()
+    assert torch.isclose(diagrams, inversed, rtol=0., atol=1e-5).all()
     assert (diagrams[:, beg:end] != transformed[:, beg:end]).all()
     if block != 4:
         assert (diagrams[:, np.sum(lenghts[:-1]):] == transformed[:, np.sum(lenghts[:-1]):]).all()
@@ -275,7 +304,7 @@ def test_PAffine_BCoupling(batch, block: int):
 @settings(deadline=5000)
 @given(batch=st.integers(min_value=1, max_value=100),
        block=st.integers(min_value=0, max_value=4))
-def test_CPAffine_TOBCoupling(batch, block: int):
+def test_Sigmoid_TOBCoupling(batch, block: int):
     Diagrammatic.clear()
 
     Diagrammatic.add_block("tm_fly", 1, block_types.floating)
@@ -288,24 +317,24 @@ def test_CPAffine_TOBCoupling(batch, block: int):
 
     for i in range(5):
         Diagrammatic.add_block(f"block{i}", lenghts[i], block_types.tm_ordered)
-    diagrams = torch.rand(batch, np.sum(lenghts)+1).to("cuda")
+    diagrams = torch.rand(batch, np.sum(lenghts)+1, dtype=torch.float64).to("cuda")
 
     # Set tm_fly greater than all other otherwise CPAffine does not work
     diagrams[:, 0] += 1
 
-    flow = TOBCoupling(block+1, transformer.CPAffine()).to("cuda")
+    flow = TOBCoupling(block+1, transformer.Sigmoid()).to("cuda")
 
-    print("Forward")
+    # print("Forward")
     transformed, log_det = flow(diagrams)
-    print("Inverse")
+    # print("Inverse")
     inversed, log_det_in = flow.inverse(transformed) 
-    print()
+    # print()
 
     # Present only to see if the backward is possible
     torch.sum(log_det).backward()
 
-    assert torch.isclose(log_det, -log_det_in, rtol=0, atol=1e-5).all()
-    assert torch.isclose(diagrams, inversed, rtol=0, atol=1e-5).all()
+    assert torch.isclose(log_det, -log_det_in, rtol=0., atol=1e-5).all()
+    assert torch.isclose(diagrams, inversed, rtol=0., atol=1e-5).all()
     assert (diagrams[:, beg:end] != transformed[:, beg:end]).all()
     if block != 4:
         assert (diagrams[:, np.sum(lenghts[:-1])+1:] == transformed[:, np.sum(lenghts[:-1])+1:]).all()
@@ -346,6 +375,29 @@ def test_DBFlip_tm_ordered(batch, n_block):
     assert (diagrams[:, :beg] == permuted[:, :beg]).all()
     assert (diagrams[:, end:] == permuted[:, end:]).all()
     assert (permuted[:, beg:end] == torch.flip(diagrams[:, beg:end].reshape(batch, lenghts[block] // 2, 2), dims=(1,)).flatten(1)).all()
+
+
+@settings(deadline=5000)
+@given(batch=st.integers(min_value=1000, max_value=20000),
+        max_order=st.integers(min_value=2, max_value=100).filter(lambda x: not x % 2))
+def test_BaseHolstein(batch, max_order):
+    Diagrammatic.clear()
+    Diagrammatic.add_block("order", 1, block_types.integer)
+    Diagrammatic.add_block("tm_fly", 1, block_types.floating)
+    Diagrammatic.add_block("phonons", max_order, block_types.tm_ordered)
+
+    dis = diagrams.BaseHolstein(max_order)
+
+    dia, log_p = dis(batch)
+    tc, td     = dia[:, 2:].chunk(2, dim=1)
+
+    assert log_p.shape == (batch,)
+    assert dia.shape == (batch, max_order + 2)
+    assert (dia[:, 0:2] > 0).all()
+    assert not (dia.isinf() | dia.isnan()).any()
+    assert not (log_p.isnan() | log_p.isinf()).any()
+    assert (td < dia[:, 1:2]).all()
+    assert (td > tc).all()
 
 #--------------------------------------
 

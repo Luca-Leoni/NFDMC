@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 
 from ..Archetypes import Transformer, LTransformer
 from torch import Tensor
@@ -264,12 +265,12 @@ class CPAffine(LTransformer):
         -------
         Tensor
             Log determinant
-        """
+            """
         L, C = self.get_constains()
         a = torch.exp(-h[:, ::2])
         c = C/(1 + torch.exp(h[:, 1::2]))
 
-        res = torch.sum(torch.log(c) - torch.log(L+a), dim=1)
+        res = torch.sum(torch.log(c / (L + a)), dim=1)
 
         bad = torch.isnan(res) | torch.isinf(res)
         if bad.any():
@@ -294,3 +295,179 @@ class CPAffine(LTransformer):
             return self.UL[:, 0:1], self.UL[:, 1:2]
         else:
             return self.UL[:, 0, ...], self.UL[:, 1, ...]
+
+
+
+class Softplus(Transformer):
+    """
+    Transformer performing the softplus transformation on the input vector, the linearized and invertible version of the ReLU function
+    """
+    def __init__(self):
+        r"""
+        Constructor
+
+        Generates a transformer that needs one parameter defining the $\beta$ of the softplus transformation, which is defined as:
+            .. math::
+                z' = \frac{1}{\beta}\log(1 + e^{\beta z})
+        Which is easily invertible and it's derivative respect to x is simply the sigmoid function. Also, it's possible to see how such transformation maps all real numbers to positive once.
+        """
+        super().__init__(1)
+
+    def forward(self, z: Tensor, h: Tensor) -> Tensor:
+        """
+        Override of the torch.nn.Module method
+
+        Transform a batch of samples appling the softplus function element wise.
+
+        Parameters
+        ----------
+        z
+            Batch of samples
+        h
+            parameters of the transformation
+
+        Returns
+        -------
+        Tensor
+            Transformed batch
+        """
+        h = torch.exp(h)
+        return nn.functional.softplus(h * z) / h
+
+    def inverse(self, z: Tensor, h: Tensor) -> Tensor:
+        r"""
+        Perform the inverse of the softplus element wise on the batch of samples given. Such transformation is simply given by:
+            .. math::
+                z' = \frac{1}{\beta}\log(e^{\beta z} - 1)
+
+        Parameters
+        ----------
+        z
+            Batch of samples
+        h
+            parameter of the transformation
+
+        Returns
+        -------
+        Tensor
+            Inverted batch
+        """
+        h = torch.exp(h)
+        res = torch.where(h * z > 20., h * z, torch.log(torch.special.expm1(h * z))) / h
+        bad = res.isinf().any(dim=1) | res.isnan().any(dim=1)
+        if bad.any():
+            print("Inverse softplus esplode!")
+            print(f"input:\n{z[bad]}")
+            print(f"param:\n{h[bad]}")
+        return torch.where(h * z > 20., h * z, torch.log(torch.special.expm1(h * z))) / h
+
+    def log_det(self, z: Tensor, h: Tensor) -> Tensor:
+        r"""
+        Computes the log determinant of the transformation, which is:
+            .. math::
+                \log \det J = \sum_i \log\left( \frac{1}{1 + e^{\beta_i z_i}} \right)
+
+        Parameters
+        ----------
+        z
+            Batch of samples
+        h
+            Parameter of the transformation
+
+        Returns
+        -------
+        Tensor
+            log determinant of the transformation for every element in the batch
+        """
+        res = nn.functional.logsigmoid(h.exp()*z).sum(dim=1)
+        bad = res.isnan() | res.isinf()
+        if bad.any():
+            print(f"Derivata della softplus esplosa per:")
+            print(z[bad])
+            print(h[bad])
+            print((h * z)[bad])
+        return nn.functional.logsigmoid(h.exp() * z).sum(dim=1)
+
+
+
+class Sigmoid(Transformer):
+    """
+    Transfomer that implements the sigmoid as a transformation applied to the entries of the samples
+    """
+    def __init__(self):
+        r"""
+        Constructor
+
+        Construct a transformer that applies the sigmoid elementwise to the elements of the samples. The transformation will so look like:
+            .. math::
+                z' = \frac{1}{1 + e^{-\sigma z}}
+        Where only one variable needed defining the smearing of the sigmoid.
+        """
+        super().__init__(1)
+
+    def forward(self, z: Tensor, h: Tensor) -> Tensor:
+        """
+        Override of the torch.nn.Module method
+
+        Apply the sigmoid function element wise to the batch of samples
+
+        Parameters
+        ----------
+        z
+            Batch of samples
+        h
+            Parameters of the transformation
+
+        Returns
+        -------
+        Tensor
+            Transformed samples
+        """
+        return torch.sigmoid(h * z)
+
+    def inverse(self, z: Tensor, h: Tensor) -> Tensor:
+        """
+        Apply the inverse of the sigmoid, the logit function, to all the element of the samples in the batch.
+
+        Parameters
+        ----------
+        z
+            Batch of samples
+        h
+            Parameters of the transformation
+
+        Returns
+        -------
+        Tensor
+            Transformed batch of samples
+        """
+        return torch.logit(z) / h
+
+    def log_det(self, z: Tensor, h: Tensor) -> Tensor:
+        r"""
+        Computes the log determinant of the Jacobian of the transformation, which is given by:
+            .. math::
+                \log \det J = \sum_i\left[ \log s(\sigma_i z_i) + \log s(-\sigma_i z_i) \right]
+        where $s$ referes to the sigmoid function itself.
+
+        Parameters
+        ----------
+        z
+            Batch of samples
+        h
+            Parameters of the tramsformation
+
+        Returns
+        -------
+        Tensor
+            Log determinant for every sample in the batch
+        """
+        x = h * z
+        res = torch.sum(nn.functional.logsigmoid(x) + nn.functional.logsigmoid(-x), dim=1)
+        bad = res.isnan() | res.isinf()
+        if bad.any():
+            print(f"Derivata della sigmoide esplosa per:")
+            print(f"input:\n{z[bad]}")
+            print(f"parameter:\n{h[bad]}")
+            print(f"h * z:\n{x[bad]}")
+        return torch.sum(nn.functional.logsigmoid(x) + nn.functional.logsigmoid(-x), dim=1)

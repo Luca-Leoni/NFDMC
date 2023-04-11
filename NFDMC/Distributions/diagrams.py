@@ -2,7 +2,7 @@ import torch
 import math
 import torch.nn as nn
 
-from torch import Tensor
+from torch import Tensor, device
 from ..Archetypes import Distribution, RSDistribution, Diagrammatic
 
 #---------------------------------------
@@ -48,18 +48,18 @@ class Holstein(Distribution, Diagrammatic):
         tm_fly = self.get_block_from("tm_fly", z)
 
         # Tranform first element in order of diagram
-        order = torch.floor(self.get_block_from("order", z))*2
+        order = torch.floor(self.get_block_from("order", z))
+
+        # Get phonon lifetime
+        tc, td = self.get_block_from("phonons", z).chunk(2, dim=1)
+        phonon = td - tc
 
         # Set to zero the element out of the order
-        zeros = torch.arange(z.shape[1] - 2, device=z.device) >= order
-        log_weight = torch.clone(self.get_block_from("phonons", z))
-        log_weight[zeros] = 0
-
-        # Compute the weight
-        log_weight =  (self.__g * order - self.__mu * tm_fly).flatten() +  self.__om * torch.sum((log_weight[:, ::2] - log_weight[:, 1::2]), dim=1)
+        zeros = torch.arange(phonon.shape[1], device=z.device) >= order
+        phonon[zeros] = 0
 
         # select right output
-        return log_weight
+        return (self.__g * order * 2 - self.__mu * tm_fly).flatten() - self.__om * phonon.sum(dim=1)
 
 
 
@@ -67,7 +67,7 @@ class BaseHolstein(Distribution, Diagrammatic):
     """
     Base distribution used for the single site Holstein model
     """
-    def __init__(self, max_order: int, max_tm_fly: float = 50., trainable: bool = False, rateo: Tensor = torch.tensor(1.0)) -> None:
+    def __init__(self, max_order: int, trainable: bool = False, rateo: Tensor = torch.tensor(1.0, dtype=torch.float64)) -> None:
         r"""
         Constructor
 
@@ -88,7 +88,6 @@ class BaseHolstein(Distribution, Diagrammatic):
         super().__init__()
 
         self.__max_or = max_order
-        self.__max_tm = max_tm_fly
 
         if trainable:
             self.rateo_tm = nn.Parameter(rateo)
@@ -134,12 +133,23 @@ class BaseHolstein(Distribution, Diagrammatic):
         Tensor
             Batch of diagrams
         """
-        R = torch.rand(size=(num_sample, 2), device=self.rateo_tm.device) * 0.9999999
-        order  = -torch.log(0.9999999 - R[:, 0:1] * (1 - torch.exp(-self.rateo_or * self.__max_or * 0.5))) / self.rateo_or
-        tm_fly = -torch.log(0.9999999 - R[:, 1:2] * (1 - torch.exp(-self.rateo_tm * self.__max_tm))) / self.rateo_tm
-        couple = torch.rand(size=(num_sample, self.__max_or), device=self.rateo_tm.device) * tm_fly
+        R = torch.rand(size=(num_sample, 2), device=self.rateo_tm.device, dtype=torch.float64)
+        order  = - (-R[:, 0:1]).log1p() / self.rateo_or
+        tm_fly = - (-R[:, 1:2]).log1p() / self.rateo_tm
 
-        return torch.cat((order, tm_fly, couple), dim=1)
+        # Generates the couples
+        rc, rd = torch.rand(size=(num_sample, self.__max_or), device=self.rateo_tm.device, dtype=torch.float64).chunk(2, dim=1)
+        tc     = rc * tm_fly
+        td     = rd * (tm_fly - tc) + tc
+
+        bad = (td > tc).logical_not() | (td > tm_fly) | (tc > tm_fly)
+        if bad.any():
+            print(f"Here the problematic td: {td[bad], rd[bad]}")
+            print(f"Here the problematic tc: {tc[bad], rc[bad]}")
+            print(f"Here the tm_fly: {tm_fly[bad.any(dim=1)]}\n")
+            print((rd * (tm_fly - tc) + tc)[bad] > tc[bad])
+
+        return torch.cat((order, tm_fly, tc, td), dim=1)
 
 
     def log_prob(self, z: Tensor) -> Tensor:
@@ -160,48 +170,9 @@ class BaseHolstein(Distribution, Diagrammatic):
         """
         tm_fly = self.get_block_from("tm_fly", z).flatten()
         order  = self.get_block_from("order", z).flatten()
+        tc, _  = self.get_block_from("phonons", z).chunk(2, dim=1)
 
-        return torch.log(self.rateo_tm * self.rateo_or) - torch.log(1 - torch.exp(-self.rateo_tm * self.__max_tm)) - torch.log(1 - torch.exp(-self.rateo_or * self.__max_or * 0.5)) - self.rateo_tm * tm_fly - self.rateo_or * order - self.__max_or * torch.log(tm_fly)
+        log_or = self.rateo_or.log() - self.rateo_or * order
+        log_tm = self.rateo_tm.log() - self.rateo_tm * tm_fly
 
-
-class SBaseHolstein(Distribution):
-    def __init__(self, tm_fly: float, max_order: int) -> None:
-        super().__init__()
-
-        self.__tm_fly = torch.tensor(tm_fly)
-        self.__max    = max_order
-
-
-    def forward(self, num_sample: int = 1) -> tuple[Tensor, Tensor]:
-        samples = self.sample(num_sample)
-        return samples, self.log_prob(samples)
-
-
-    def sample(self, num_sample: int = 1) -> Tensor:
-        order  = -torch.log(torch.rand(num_sample, 1, device=self.__tm_fly.device))
-        phonon = torch.rand(num_sample, self.__max, device=self.__tm_fly.device) * self.__tm_fly
-        return torch.cat( (order, phonon), dim=1 )
-
-
-    def log_prob(self, z: Tensor) -> Tensor:
-        return -z[:, 0] - self.__max * torch.log(self.__tm_fly)
-
-
-class SHolstein(Distribution):
-    def __init__(self, phonon: float, coupling: float) -> None:
-        super().__init__()
-
-        self.__Omega = phonon
-        self.__g = math.log(coupling)
-
-
-    def log_prob(self, z: Tensor) -> Tensor:
-        order  = torch.floor(z[:, 0:1])
-        phonon = z[:, 1:]
-
-        zeros  = torch.arange(phonon.shape[1], device=z.device).expand(*phonon.shape) > order
-        phonon[zeros] = 0
-
-        return self.__g * order * 2 - self.__Omega * torch.sum(phonon, dim=1)
-
-
+        return log_or + log_tm - 0.5 * self.__max_or * tm_fly.log() - (tm_fly.unsqueeze(-1) - tc).log().sum(dim=1)

@@ -131,7 +131,7 @@ class Coupling(Flow):
         tuple[Tensor, Tensor]
             Transformed variable with log determinant of the Jacobian
         """
-        z1, z2 = self.__split(z)
+        z1, z2 = z.chunk(2, dim=1)
         h = self.__cond(z1) 
         return torch.cat((z1, self.__trans(z2, h)), dim = 1), self.__trans.log_det(z2, h)
 

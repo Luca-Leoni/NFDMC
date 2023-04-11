@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 from torch import Tensor
@@ -27,7 +28,7 @@ class RealMVP(nn.Module):
 
         net = []
         for i in range(len(dims)-1):
-            net.append(nn.Linear(dims[i], dims[i+1], bias))
+            net.append(nn.Linear(dims[i], dims[i+1], bias, dtype=torch.float64))
             net.append(nn.LeakyReLU(leaky))
         net.pop()
 

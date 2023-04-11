@@ -101,16 +101,16 @@ class OBCoupling(Flow, Diagrammatic):
     """
     Coupling Diagrammatic Flow that act on the order block
     """
-    def __init__(self, trans: LTransformer, hidden_size: int = 100) -> None:
+    def __init__(self, trans: Transformer, hidden_size: int = 100) -> None:
         """
-        COnstructor
+        Constructor
 
         Generates a Diagrammatic Coupling flow that acts on the order of the diagram specifically. It automatically computes the upper limit for the order
 
         Parameters
         ----------
         trans
-            Limited transformer to use
+            Transformer to use
         hidden_size
             Size of the hidden layer for the conditioner
         """
@@ -128,16 +128,6 @@ class OBCoupling(Flow, Diagrammatic):
 
         # Save transformer
         self.__trans = trans
-
-        # Set the transformer limit
-        max   = torch.tensor(0.)
-        for i, bt in enumerate(self.get_block_types()):
-            if bt == block_types.tm_ordered:
-                max += self.get_blocks_lenght()[i] // 2
-        self.__trans.set_upper_limit(max)
-        
-        # For debugging
-        self.__max = max
 
     
     def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
@@ -160,14 +150,6 @@ class OBCoupling(Flow, Diagrammatic):
         z1, z2 = torch.split(z, self.__split, dim=1)
         h  = self.__cond(z1)
         z, _ = self.__swap(torch.cat((z1, self.__trans(z2, h)), dim=1))
-
-        bad = (z[:, 0] > self.__max)
-        if bad.any():
-            print("From OBCoupling:\n")
-            print(z2[bad])
-            print(h[bad])
-            print(self.__trans(z2, h)[bad])
-
         return  z, self.__trans.log_det(z2, h)
 
     def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]:
@@ -196,7 +178,7 @@ class TFBCoupling(Flow, Diagrammatic):
     """
     Diagrammatic Coupling Flow that acts specifically on the tm_fly block
     """
-    def __init__(self, trans: LTransformer, max_tm: float = 50, hidden_size: int = 100) -> None:
+    def __init__(self, trans: Transformer, hidden_size: int = 100) -> None:
         """
         Constructor
 
@@ -206,8 +188,6 @@ class TFBCoupling(Flow, Diagrammatic):
         ----------
         trans
             Limited trasnformer to use
-        max_tm
-            Maximum limit for the time of flight
         hidden_size
             Hidden size for the RealMVP used as conditioner
         """
@@ -225,15 +205,6 @@ class TFBCoupling(Flow, Diagrammatic):
 
         # Save transformer
         self.__trans = trans
-
-        # Search of time ordered blocks
-        self.__tmb   = []
-        for i, bt in enumerate(self.get_block_types()):
-            if bt == block_types.tm_ordered:
-                self.__tmb.append(i)
-
-        # Save the maximum value
-        self.__max = float(max_tm)
 
 
     def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
@@ -255,23 +226,7 @@ class TFBCoupling(Flow, Diagrammatic):
         z, _ = self.__swap(z)
         z1, z2 = torch.split(z, self.__split, dim=1)
         h  = self.__cond(z1)
-        
-        # search maximum to set limit
-        max = torch.zeros(z.shape[0], device=z.device)
-        for block in self.__tmb:
-            max = torch.max(self.get_block_from(block, z), dim=1, keepdim=True)[0]
-        self.__set_limit(max)
-
-        z, _ = self.__swap(torch.cat((z1, self.__trans(z2, h) + max), dim=1))
-
-        bad = (z > self.__max).any(dim=1)
-        if bad.any():
-            print("From TFBCoupling:\n")
-            print(z2[bad])
-            print(h[bad])
-            print(max[bad])
-            print(self.__trans(z2, h)[bad])
-
+        z, _ = self.__swap(torch.cat((z1, self.__trans(z2, h)), dim=1))
         return  z, self.__trans.log_det(z2, h)
 
 
@@ -292,33 +247,9 @@ class TFBCoupling(Flow, Diagrammatic):
         z, _ = self.__swap(z)
         z1, z2 = torch.split(z, self.__split, dim=1)
         h = self.__cond(z1)
-        
-        # search maximum
-        max = torch.zeros(z.shape[0], device=z.device)
-        for block in self.__tmb:
-            max = torch.max(self.get_block_from(block, z), dim=1, keepdim=True)[0]
-        self.__set_limit(max)
-
-        z2 = self.__trans.inverse(z2 - max, h)
+        z2 = self.__trans.inverse(z2, h)
         z, _ = self.__swap(torch.cat((z1, z2), dim=1))
         return  z, -self.__trans.log_det(z2, h)
-
-
-    def __set_limit(self, max: Tensor):
-        """
-        Utility to set the limits of the transformer
-
-        The limits are given by C = maximum_tm_fly - maximum_phonon_time and L = maximum_tm_fly for every element in the batch
-
-        Parameters
-        ----------
-        max
-            Array with all the maximum phonon times in every diagram
-        """
-        UL = torch.full((max.shape[0], 2), self.__max, device=max.device)
-        UL[:, 1:2] -= max
-        self.__trans.set_upper_limit(UL)
-
 
 
 
@@ -326,7 +257,7 @@ class TOBCoupling(Flow, Diagrammatic):
     """
     Diagrammatic Coupling Flow specific for the time ordered blocks
     """
-    def __init__(self, block: int | str, trans: LTransformer, hidden_size: int = 100):
+    def __init__(self, block: int | str, trans: Transformer, hidden_size: int = 100):
         """
         COnstructor
 
@@ -337,7 +268,7 @@ class TOBCoupling(Flow, Diagrammatic):
         block
             Time order block to which apply the transformation
         trans
-            Limited transformation to use
+            Transformer that maps R to [0, 1]
         hidden_size
             Hidden size of the RealMVP used as conditioner
 
@@ -395,43 +326,23 @@ class TOBCoupling(Flow, Diagrammatic):
         # Swap the eanted block at the end and split the diagram
         z, _ = self.__swap(z)
         z1, z2 = torch.split(z, self.__split, dim=1)
-        h = self.__cond(z1).reshape(z.shape[0], z2.shape[1], self.__trans.trans_features)
+        h = self.__cond(z1)
+        tm_fly = self.get_block_from(self.__t, z)
+        tc, td = (0.9999999 * tm_fly * self.__trans(z2, h)).chunk(2, dim=1)
+        td = (1 - tc/tm_fly) * td + tc
 
-        tm_fly = self.get_block_from("tm_fly", z).clone()
-
-        self.__set_limits(z)
-
-        # Evaluate the new creation times (No idea why the clone is needed but it IS)
-        tc = self.__trans(z2[:, ::2], h[:, 0::2, :].flatten(1))
-
-        # Update constrain on destruction to tm_fly - new tm_creation
-        self.__set_limits(z, tc)
-
-        # Evaluate the new destruction times
-        td = self.__trans(z2[:, 1::2], h[:, 1::2, :].flatten(1)) + tc
-
-        zf = torch.cat( (tc.unsqueeze(-1), td.unsqueeze(-1)), dim=2 ).flatten(1)
-        bad = (zf > z[:, 1:2]).any(dim=1) | (td < tc).any(dim=1)
-        bad = bad | torch.isnan(zf).any(dim=1) | torch.isinf(zf).any(dim=1)
+        bad = torch.isinf(torch.log(tm_fly*(tm_fly - tc)).sum(dim=1))
         if bad.any():
-            print("FromTOBCoupling:\n")
-            print(f"Old tmd:\n{z2[bad]}")
-            print(f"Old tmc:\n{z1[bad]}")
-            print(f"New tmd\n{td[bad]}")
-            print(f"New tmc:\n{tc[bad]}")
+            print(f"Esploso il logaritmo in TOBCoupling!")
             print(f"Parameters:\n{h[bad]}")
-
-        # Reconstruct couples
-        z2 = torch.cat( (tc.unsqueeze(-1), td.unsqueeze(-1)), dim=2 ).flatten(1)
+            print(f"Input:\n{z2[bad]}")
+            print(f"Creation time:\n{tc[bad]}")
+            print(f"Destruction time:\n{td[bad]}")
+            print(f"Time of fly:\n{tm_fly[bad]}")
 
         # Recreate the diagrams batch
-        z, _ = self.__swap(torch.cat((z1, z2), dim=1)) 
-
-        if (tm_fly != self.get_block_from("tm_fly", z)).any():
-            print("TOB fa casino!")
-
-        self.__set_limits(z, tc, total=True)
-        return z, self.__trans.log_det(z2, h.flatten(1))
+        z, _ = self.__swap(torch.cat((z1, torch.cat((tc, td), dim=1)), dim=1)) 
+        return z, torch.log(tm_fly*(tm_fly - tc)).sum(dim=1) + self.__trans.log_det(z2, h)
 
 
     def inverse(self, z: Tensor) -> tuple[Tensor, Tensor]:
@@ -450,36 +361,17 @@ class TOBCoupling(Flow, Diagrammatic):
         """
         # Swap the eanted block at the end and split the diagram
         z, _ = self.__swap(z)
-        z1, z2 = torch.split(z, self.__split, dim=1)
+        z1, z2 = z.split(self.__split, dim=1)
         h = self.__cond(z1)
-        
-        # First subtract the creation to destruction
-        tc = z2[:, ::2]
-        td = z2[:, 1::2] - tc
 
-        # Reconstruct couples
-        z2 = torch.cat( (tc.reshape(tc.shape[0], tc.shape[1], 1), td.reshape(tc.shape[0], td.shape[1], 1)), dim=2 ).flatten(1)
+        # First subtract the creation to destruction
+        tm_fly = self.get_block_from(self.__t, z)
+        tc, td = (z2 / tm_fly).chunk(2, dim=1)
+        td = (td - tc) / (1 - tc)
 
         # Invert
-        self.__set_limits(z, tc, total=True)
-        z2 = self.__trans.inverse(z2, h)
+        z2 = self.__trans.inverse(torch.cat((tc, td), dim=1), h)
 
         # Recreate the diagrams batch
         z, _ = self.__swap(torch.cat((z1, z2), dim=1))
-
-        return z, -self.__trans.log_det(z2, h)
-
-
-    def __set_limits(self, z: Tensor, tc: Tensor | None = None, total: bool = False):
-        if total:
-            UL = self.get_block_from(self.__t, z).repeat(1, self.__split[1]*2)
-            UL = UL.reshape(UL.shape[0], 2, self.__split[1])
-            UL[:, 1, 1::2] -= tc
-            self.__trans.set_upper_limit(UL)
-        elif isinstance(tc, type(None)):
-            self.__trans.set_upper_limit(self.get_block_from(self.__t, z))
-        else:
-            UL = self.get_block_from(self.__t, z).repeat(1, self.__split[1])
-            UL[:, self.__split[1]//2 :] -= tc
-            UL = UL.reshape(UL.shape[0], 2, self.__split[1] // 2)
-            self.__trans.set_upper_limit(UL)
+        return z, -torch.log(tm_fly*tm_fly*(1 - tc)).sum(dim=1) - self.__trans.log_det(z2, h)
