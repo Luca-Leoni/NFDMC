@@ -1,6 +1,7 @@
 import torch
 
 from ..Archetypes import Flow, Transformer, Conditioner
+from ..Modules import nets
 from torch import Tensor
 from torch.nn import Module
 
@@ -85,7 +86,7 @@ class Coupling(Flow):
     """
     Defines a coupling layer where only a part of the input is transformed, and the parameters are computed on the other first part
     """
-    def __init__(self, trans: Transformer, cond: Module, split: list[int] | None = None):
+    def __init__(self, trans: Transformer, cond: Module, split: list[int] | int):
         """
         Constructor
 
@@ -101,19 +102,21 @@ class Coupling(Flow):
         cond
             Network used to evaluate the parameters to use in the transformer computations
         split
-            List containing the two dimensions of the slice in which the input variable will be splitted, if not inserted the input will be splitted in half
+            List containing the two dimensions of the slice in which the input variable will be splitted, or the size of the input vector so that it will be splitted in half
         """
         super().__init__()
 
         self.__trans = trans
         self.__cond  = cond
 
-        if isinstance(split, type(None)):
-            self.__split = lambda x: torch.split(x, x.shape[1] // 2, dim = 1)
-        elif len(split) != 2:
-            raise ValueError("The input variable needs to be splitted in two parts, different number of dimensions inserted!")
+        if isinstance(split, int):
+            self.__split = [split // 2, split - (split // 2)]
+        elif isinstance(split, list):
+            if len(split) != 2:
+                raise ValueError("The input variable needs to be splitted in two parts, different number of dimensions inserted!")
+            self.__split = split
         else:
-            self.__split = lambda x: torch.split(x, split, dim = 1)
+            raise TypeError("The split needs to be an integer type with input dimensions or a list of two ints with split sizes!")
 
     def forward(self, z: Tensor) -> tuple[Tensor, Tensor]:
         """
@@ -131,7 +134,7 @@ class Coupling(Flow):
         tuple[Tensor, Tensor]
             Transformed variable with log determinant of the Jacobian
         """
-        z1, z2 = z.chunk(2, dim=1)
+        z1, z2 = z.split(self.__split, dim=1)
         h = self.__cond(z1) 
         return torch.cat((z1, self.__trans(z2, h)), dim = 1), self.__trans.log_det(z2, h)
 
@@ -151,7 +154,49 @@ class Coupling(Flow):
         tuple[Tensor, Tensor]
             Untransformed variables and log det Jacobian of the inverse
         """
-        z1, z2 = self.__split(z)
+        z1, z2 = z.split(self.__split, dim=1)
         h = self.__cond(z1)
         z2 = self.__trans.inverse(z2,h)
         return torch.cat((z1, z2), dim = 1), -self.__trans.log_det(z2, h)
+
+
+class NVPCoupling(Coupling):
+    """
+    Coupling layer that uses MLP conditioner architecture, even if that is not its real name.
+    """
+    def __init__(self, trans: Transformer, split: list[int] | int, hidden_dim: int = 100, activate_out: bool = False, weight_nor: bool = False):
+        """
+        Constructor
+
+        Works analogusly to the normal coupling layer but it can automatically define the conditioner using the MLP one based on the split size and the transformer features
+
+        Parameters
+        ----------
+        trans
+            Transformer to use in the flow
+        split
+            Split sizes of the input vector or size of the vector itself to cut it in half
+        hidden_dim
+            Size of the hidden layers of the conditioner
+
+        Raises
+        ------
+        ValueError:
+            Error if the list of split contains more than two elements or only one
+        TypeError:
+            Error if the type of the split is not an integer or a list of integers  
+        """
+        dims = ()
+        if isinstance(split, int):
+            dims = (split // 2, hidden_dim, hidden_dim, trans.trans_features * (split - split // 2))
+        elif isinstance(split, list):
+            if len(split) != 2:
+                raise ValueError("The input variable needs to be splitted in two parts, different number of dimensions inserted!")
+            dims = (split[0], hidden_dim, hidden_dim, trans.trans_features * split[1])
+        else:
+            raise TypeError("The split needs to be an integer type with input dimensions or a list of two ints with split sizes!")
+
+        super().__init__(trans, nets.MLP(*dims, activate_out=activate_out, weight_nor=weight_nor), split)
+
+
+

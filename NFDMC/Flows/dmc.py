@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from torch import Tensor
 from ..Archetypes import Flow, Diagrammatic, block_types, Transformer, LTransformer
-from ..Modules.nets import RealMVP
+from ..Modules.nets import MLP
 from .permutation import SwapDiaBlock
 
 #------------------------------------------
@@ -18,7 +18,7 @@ class BCoupling(Flow, Diagrammatic):
 
         Diagrammatic flow that allows for the application of a specific transformation on a selected block of the diagram using a normal Coupling architecture.
         The idea is to swap the selected block to the bottom of the diagram and then apply a split so to apply the transformation on the last part of the block influenced by all the other elements.
-        In particular the block automatically defines the conditioner as a RealMVP NN with input and output sizes defined by the diagram compoisition and the transformer parameters needed.
+        In particular the block automatically defines the conditioner as a MLP NN with input and output sizes defined by the diagram compoisition and the transformer parameters needed.
 
         Parameters
         ----------
@@ -27,7 +27,7 @@ class BCoupling(Flow, Diagrammatic):
         trans
             Transformer to use on the block
         hidden_size
-            Size of the hidden layer of the RealMVP used as conditioner
+            Size of the hidden layer of the MLP used as conditioner
         """
         super().__init__()
 
@@ -46,7 +46,7 @@ class BCoupling(Flow, Diagrammatic):
         self.__swap = SwapDiaBlock(block, -1) 
 
         # Define the conditioner based on the split
-        self.__cond = RealMVP(self.__split[0], hidden_size, hidden_size, self.__split[1] * trans.trans_features)
+        self.__cond = MLP(self.__split[0], hidden_size, hidden_size, self.__split[1] * trans.trans_features)
 
         # Save transformer
         self.__trans = trans
@@ -68,10 +68,22 @@ class BCoupling(Flow, Diagrammatic):
         tuple[Tensor, Tensor]
             Transformed batch and log det
         """
+        # x = z.clone()
         z, _ = self.__swap(z)
+        # sx = z.clone()
         z1, z2 = torch.split(z, self.__split, dim=1)
+        # zz1 = z1.clone()
+        # zz2 = z2.clone()
         h = self.__cond(z1)
         z, _ = self.__swap(torch.cat((z1, self.__trans(z2, h)), dim=1))
+
+        # Debugging
+        # bad = z.isinf().any(dim=1) | z.isnan().any(dim=1)
+        # if bad.any():
+        #     print(f"starting vector:\n{x[bad]}")
+        #     print(f"swapped vector:\n{sx[bad]}")
+        #     print(f"splitted vector:\n{zz1[bad], zz2[bad]}")
+
         return  z, self.__trans.log_det(z2, h)
 
 
@@ -124,7 +136,7 @@ class OBCoupling(Flow, Diagrammatic):
         self.__swap  = SwapDiaBlock("order", -1) 
 
         # Define the conditioner based on the split
-        self.__cond  = RealMVP(self.__split[0], hidden_size, hidden_size, trans.trans_features)
+        self.__cond  = MLP(self.__split[0], hidden_size, hidden_size, trans.trans_features)
 
         # Save transformer
         self.__trans = trans
@@ -189,7 +201,7 @@ class TFBCoupling(Flow, Diagrammatic):
         trans
             Limited trasnformer to use
         hidden_size
-            Hidden size for the RealMVP used as conditioner
+            Hidden size for the MLP used as conditioner
         """
         super().__init__()
 
@@ -201,7 +213,7 @@ class TFBCoupling(Flow, Diagrammatic):
         self.__swap  = SwapDiaBlock("tm_fly", -1) 
 
         # Define the conditioner based on the split
-        self.__cond  = RealMVP(self.__split[0], hidden_size, hidden_size, trans.trans_features)
+        self.__cond  = MLP(self.__split[0], hidden_size, hidden_size, trans.trans_features)
 
         # Save transformer
         self.__trans = trans
@@ -270,7 +282,7 @@ class TOBCoupling(Flow, Diagrammatic):
         trans
             Transformer that maps R to [0, 1]
         hidden_size
-            Hidden size of the RealMVP used as conditioner
+            Hidden size of the MLP used as conditioner
 
         Raises
         ------
@@ -298,7 +310,7 @@ class TOBCoupling(Flow, Diagrammatic):
         self.__swap = SwapDiaBlock(block, -1) 
 
         # Define the conditioner based on the split
-        self.__cond = RealMVP(self.__split[0], hidden_size, hidden_size, self.__split[1] * trans.trans_features)
+        self.__cond = MLP(self.__split[0], hidden_size, hidden_size, self.__split[1] * trans.trans_features)
 
         # Save transformer
         self.__trans = trans

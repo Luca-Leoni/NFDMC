@@ -1,9 +1,9 @@
 import torch
 
-from NFDMC.Flows import Autoregressive, Coupling
+from NFDMC.Flows import Autoregressive, Coupling, NVPCoupling
 from NFDMC.Flows.conditioner import MaskedConditioner
-from NFDMC.Flows.transformer import Affine
-from NFDMC.Modules.nets import RealMVP
+from NFDMC.Flows.transformer import Affine, Softplus
+from NFDMC.Modules.nets import MLP
 
 from hypothesis import given, settings, strategies as st
 
@@ -60,19 +60,37 @@ def test_Affine_Coupling(var_dim, num_sample):
     Check dimensions of the net and the fact that the inverse is really an inverse
     """
     split = [var_dim // 2, var_dim - (var_dim // 2)]
-    flow = Coupling(Affine(), RealMVP(split[0], 30, 30, 2 * split[1]), split=split).to("cuda")
+    flow = Coupling(Affine(), MLP(split[0], 30, 30, 2 * split[1]), split=split).to("cuda")
 
-    z = torch.rand(num_sample, var_dim, device="cuda")
+    z = torch.rand(num_sample, var_dim, device="cuda", dtype=torch.float64)
     z1, log_det = flow(z)
+    z2, log_det_inv = flow.inverse(z1)
 
     assert z1.shape == (num_sample, var_dim)
     assert log_det.shape == (num_sample,)
-
-    z2, log_det = flow.inverse(z1)
-    
     assert z2.shape == (num_sample, var_dim)
+    assert (log_det == -log_det_inv).all()
+    assert torch.isclose(z2, z, rtol=0., atol=1e-5).all()
+
+
+@settings(deadline=5000)
+@given(var_dim=st.integers(min_value=2, max_value=100),
+       num_sample=st.integers(min_value=1, max_value=1000))
+def test_Softplus_NVPCoupling(var_dim, num_sample):
+    """
+    Check dimensions of the net and the fact that the inverse is really an inverse
+    """
+    flow = NVPCoupling(Softplus(), split=var_dim).to("cuda")
+
+    z = torch.rand(num_sample, var_dim, device="cuda", dtype=torch.float64)
+    z1, log_det = flow(z)
+    z2, log_det_inv = flow.inverse(z1)
+
+    assert z1.shape == (num_sample, var_dim)
     assert log_det.shape == (num_sample,)
-    assert torch.isclose(z2, z, rtol=0., atol=0.00001).all()
+    assert z2.shape == (num_sample, var_dim)
+    assert torch.isclose(log_det, -log_det_inv, rtol=0, atol=1e-5).all()
+    assert torch.isclose(z2, z, rtol=0., atol=1e-5).all()
 
 #--------------------------------
 

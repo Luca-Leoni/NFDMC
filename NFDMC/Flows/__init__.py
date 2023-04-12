@@ -1,2 +1,2 @@
 # Import the main type of network
-from .composable import Autoregressive, Coupling
+from .composable import Autoregressive, Coupling, NVPCoupling

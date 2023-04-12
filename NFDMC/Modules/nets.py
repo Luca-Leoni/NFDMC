@@ -1,13 +1,14 @@
 import torch
 import torch.nn as nn
 
+from torch.nn.utils import weight_norm
 from torch import Tensor
 
-class RealMVP(nn.Module):
+class MLP(nn.Module):
     """
     General network composed of linear layers and leaky ReLU activation functions
     """
-    def __init__(self, *dims: int, leaky: float = 0.0, bias: bool = True, init_zero: bool = False):
+    def __init__(self, *dims: int, leaky: float = 0.0, bias: bool = True, activate_out: bool = False, init_zero: bool = False, weight_nor: bool = False):
         """
         Constructor
 
@@ -28,9 +29,13 @@ class RealMVP(nn.Module):
 
         net = []
         for i in range(len(dims)-1):
-            net.append(nn.Linear(dims[i], dims[i+1], bias, dtype=torch.float64))
+            if i == len(dims)-2 and weight_nor:
+                net.append(weight_norm(nn.Linear(dims[i], dims[i+1], bias, dtype=torch.float64)))
+            else:
+                net.append(nn.Linear(dims[i], dims[i+1], bias, dtype=torch.float64))
             net.append(nn.LeakyReLU(leaky))
-        net.pop()
+        if not activate_out:
+            net.pop()
 
         if init_zero:
             nn.init.zeros_(net[-1].weight)

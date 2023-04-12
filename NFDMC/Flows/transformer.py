@@ -331,8 +331,13 @@ class Softplus(Transformer):
         Tensor
             Transformed batch
         """
-        h = torch.exp(h)
-        return nn.functional.softplus(h * z) / h
+        res = nn.functional.softplus(h * z) / h
+        bad = (res.isnan() | res.isinf()).any(dim=1)
+        if bad.any():
+            print("Softplus exploded!")
+            print(f"input:\n{z[bad]}")
+            print(f"param:\n{h[bad]}")
+        return res
 
     def inverse(self, z: Tensor, h: Tensor) -> Tensor:
         r"""
@@ -352,14 +357,13 @@ class Softplus(Transformer):
         Tensor
             Inverted batch
         """
-        h = torch.exp(h)
         res = torch.where(h * z > 20., h * z, torch.log(torch.special.expm1(h * z))) / h
         bad = res.isinf().any(dim=1) | res.isnan().any(dim=1)
         if bad.any():
             print("Inverse softplus esplode!")
             print(f"input:\n{z[bad]}")
             print(f"param:\n{h[bad]}")
-        return torch.where(h * z > 20., h * z, torch.log(torch.special.expm1(h * z))) / h
+        return res
 
     def log_det(self, z: Tensor, h: Tensor) -> Tensor:
         r"""
@@ -379,14 +383,14 @@ class Softplus(Transformer):
         Tensor
             log determinant of the transformation for every element in the batch
         """
-        res = nn.functional.logsigmoid(h.exp()*z).sum(dim=1)
+        res = - torch.nn.functional.softplus(- h * z).sum(dim=1)
         bad = res.isnan() | res.isinf()
         if bad.any():
             print(f"Derivata della softplus esplosa per:")
             print(z[bad])
             print(h[bad])
             print((h * z)[bad])
-        return nn.functional.logsigmoid(h.exp() * z).sum(dim=1)
+        return res
 
 
 
@@ -423,7 +427,13 @@ class Sigmoid(Transformer):
         Tensor
             Transformed samples
         """
-        return torch.sigmoid(h * z)
+        res = torch.sigmoid(h * z)
+        bad = res.isnan().any(dim=1) | res.isinf().any(dim=1)
+        if bad.any():
+            print("Sigmoid exploded!")
+            print(f"input:\n{z[bad]}")
+            print(f"param:\n{h[bad]}")
+        return res
 
     def inverse(self, z: Tensor, h: Tensor) -> Tensor:
         """
@@ -463,11 +473,11 @@ class Sigmoid(Transformer):
             Log determinant for every sample in the batch
         """
         x = h * z
-        res = torch.sum(nn.functional.logsigmoid(x) + nn.functional.logsigmoid(-x), dim=1)
+        res = -torch.sum(nn.functional.softplus(x) + nn.functional.softplus(-x), dim=1)
         bad = res.isnan() | res.isinf()
         if bad.any():
             print(f"Derivata della sigmoide esplosa per:")
             print(f"input:\n{z[bad]}")
             print(f"parameter:\n{h[bad]}")
             print(f"h * z:\n{x[bad]}")
-        return torch.sum(nn.functional.logsigmoid(x) + nn.functional.logsigmoid(-x), dim=1)
+        return res
